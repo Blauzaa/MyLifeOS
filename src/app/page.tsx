@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient } from '../utils/supabase/client'
+import { createClient } from '../utils/supabase/supabaseClient'
 import { Plus } from 'lucide-react'
 
 // 1. Kita definisikan bentuk datanya supaya TypeScript tidak marah
