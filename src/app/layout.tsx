@@ -1,3 +1,4 @@
+import AIChat from "../components/AIChat";
 import Sidebar from "../components/Sidebar";
 import "./globals.css";
 
@@ -5,6 +6,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="bg-slate-900 text-slate-100 min-h-screen">
+        <AIChat />
         <div className="flex">
           {/* Sidebar */}
           <Sidebar />
