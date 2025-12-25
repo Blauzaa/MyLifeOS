@@ -1,162 +1,86 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { User } from '@supabase/supabase-js'
 import { createClient } from '../utils/supabase/supabaseClient'
-import { Briefcase, Coffee, Loader2 } from 'lucide-react'
+import { Wallet, CheckCircle, Link as LinkIcon } from 'lucide-react' // Hapus arrow yang ga kepake
+import { User } from '@supabase/supabase-js' // Import tipe User
 
-// Import Components & Types
-import { LinkItem, TaskItem, EventItem, SnippetItem } from '../types'
-import AgendaWidget from '../components/AgendaWidget'
-import LinksWidget from '../components/LinksWidget'
-import KanbanBoard from '../components/KanbanBoard'
-import SnippetVault from '../components/SnippetVault'
-
-export default function Home() {
+export default function DashboardOverview() {
   const supabase = createClient()
-
-  // STATE
-  const [mode, setMode] = useState<'work' | 'life'>('work')
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'snippets'>('dashboard')
+  const [stats, setStats] = useState({ tasks: 0, links: 0, balance: 0 })
+  // FIX 1: Ganti any dengan User | null
   const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
 
-  // DATA
-  const [links, setLinks] = useState<LinkItem[]>([])
-  const [tasks, setTasks] = useState<TaskItem[]>([])
-  const [events, setEvents] = useState<EventItem[]>([])
-  const [snippets, setSnippets] = useState<SnippetItem[]>([])
-
-  // --- INITIAL DATA FETCH ---
   useEffect(() => {
-    const initData = async () => {
+    const getData = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       setUser(user)
-
       if (user) {
-        const [l, t, e, s] = await Promise.all([
-          supabase.from('dynamic_items').select('*').order('created_at', { ascending: true }),
-          supabase.from('tasks').select('*').order('created_at', { ascending: false }),
-          supabase.from('events').select('*').order('time', { ascending: true }),
-          supabase.from('snippets').select('*').order('created_at', { ascending: false }),
-        ])
-        if (l.data) setLinks(l.data as LinkItem[])
-        if (t.data) setTasks(t.data as TaskItem[])
-        if (e.data) setEvents(e.data as EventItem[])
-        if (s.data) setSnippets(s.data as SnippetItem[])
-      }
-      setLoading(false)
-    }
-    initData()
-  }, [supabase])
-
-  // --- HANDLERS (LOGIC) ---
-  const checkLogin = () => {
-    if (!user) {
-      alert('Login dulu!')
-      return false
-    }
-    return true
-  }
-
-  // 1. Agenda Handlers
-  const addEvent = async (event: Omit<EventItem, 'id'>) => {
-    if (!checkLogin()) return
-    const { data } = await supabase.from('events').insert({ ...event, user_id: user!.id }).select().single()
-    if (data) setEvents([...events, data])
-  }
-  const deleteEvent = async (id: string) => {
-    const { error } = await supabase.from('events').delete().eq('id', id)
-    if (!error) setEvents(events.filter((i) => i.id !== id))
-  }
-
-  // 2. Link Handlers
-  const addLink = async (link: { title: string; url: string }) => {
-    if (!checkLogin()) return
-    const { data } = await supabase.from('dynamic_items').insert({ ...link, type: mode, user_id: user!.id }).select().single()
-    if (data) setLinks([...links, data])
-  }
-  const deleteLink = async (id: string) => {
-    const { error } = await supabase.from('dynamic_items').delete().eq('id', id)
-    if (!error) setLinks(links.filter((i) => i.id !== id))
-  }
-
-  // 3. Task Handlers
-  const addTask = async (title: string) => {
-    if (!checkLogin()) return
-    const { data } = await supabase.from('tasks').insert({ title, status: 'todo', category: mode, user_id: user!.id }).select().single()
-    if (data) setTasks([data, ...tasks])
-  }
-  const deleteTask = async (id: string) => {
-    const { error } = await supabase.from('tasks').delete().eq('id', id)
-    if (!error) setTasks(tasks.filter((i) => i.id !== id))
-  }
-  const moveTask = async (id: string, currentStatus: string) => {
-    const next = currentStatus === 'doing' ? 'done' : 'doing'
-    setTasks(tasks.map((t) => (t.id === id ? { ...t, status: next } : t)))
-    await supabase.from('tasks').update({ status: next }).eq('id', id)
-  }
-
-  // 4. Snippet Handlers
-  const addSnippet = async (snippet: { title: string; code: string }) => {
-    if (!checkLogin()) return
-    const { data } = await supabase.from('snippets').insert({ ...snippet, user_id: user!.id }).select().single()
-    if (data) setSnippets([data, ...snippets])
-  }
-  const deleteSnippet = async (id: string) => {
-    const { error } = await supabase.from('snippets').delete().eq('id', id)
-    if (!error) setSnippets(snippets.filter((i) => i.id !== id))
-  }
-
-  // --- RENDER ---
-  return (
-    <main className={`min-h-screen transition-colors duration-500 ${mode === 'work' ? 'bg-slate-950 text-slate-100' : 'bg-stone-900 text-stone-100'} p-4 md:p-8 font-sans`}>
-      <div className="max-w-7xl mx-auto">
+        // Hitung total task
+        const { count: taskCount } = await supabase.from('tasks').select('*', { count: 'exact', head: true }).eq('status', 'todo')
+        // Hitung total link
+        const { count: linkCount } = await supabase.from('dynamic_items').select('*', { count: 'exact', head: true })
+        // Hitung Keuangan
+        const { data: trans } = await supabase.from('transactions').select('amount, type')
         
-        {/* HEADER */}
-        <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4 border-b border-white/10 pb-6">
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold tracking-tight">LifeOS v3.1</h1>
-            <div className="flex bg-white/5 rounded-lg p-1">
-              <button onClick={() => setActiveTab('dashboard')} className={`px-3 py-1 text-xs rounded ${activeTab === 'dashboard' ? 'bg-white/20' : 'opacity-50'}`}>Dashboard</button>
-              <button onClick={() => setActiveTab('snippets')} className={`px-3 py-1 text-xs rounded ${activeTab === 'snippets' ? 'bg-white/20' : 'opacity-50'}`}>Snippets</button>
-            </div>
+        let income = 0, expense = 0
+        // FIX 2: Kasih tahu TypeScript kalau t itu punya structure tertentu
+        trans?.forEach((t: { amount: number, type: string }) => 
+          t.type === 'income' ? income += Number(t.amount) : expense += Number(t.amount)
+        )
+
+        setStats({ tasks: taskCount || 0, links: linkCount || 0, balance: income - expense })
+      }
+    }
+    getData()
+  }, [supabase]) // FIX 3: Tambahkan supabase ke dependency
+
+  return (
+    <div className="space-y-8">
+      {/* Welcome Banner */}
+      <div className="bg-gradient-to-r from-blue-900/50 to-purple-900/50 p-8 rounded-3xl border border-white/5">
+        <h1 className="text-3xl md:text-4xl font-bold mb-2">👋 Welcome back, {user?.email?.split('@')[0]}!</h1>
+        {/* FIX 4: Ganti what's dengan what&apos;s */}
+        <p className="text-blue-200/60">Here is what&apos;s happening in your life today.</p>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Card 1: Task */}
+        <div className="bg-slate-800/50 p-6 rounded-2xl border border-white/5 flex items-center justify-between">
+          <div>
+            <p className="text-slate-400 text-sm mb-1">Pending Tasks</p>
+            <h2 className="text-3xl font-bold">{stats.tasks}</h2>
           </div>
-          
-          <div className="flex items-center gap-3">
-            <div className="bg-white/10 p-1 rounded-lg flex">
-              <button onClick={() => setMode('work')} className={`px-3 py-1.5 rounded text-xs flex items-center gap-2 ${mode === 'work' ? 'bg-blue-600' : 'opacity-50'}`}><Briefcase size={14}/> Work</button>
-              <button onClick={() => setMode('life')} className={`px-3 py-1.5 rounded text-xs flex items-center gap-2 ${mode === 'life' ? 'bg-emerald-600' : 'opacity-50'}`}><Coffee size={14}/> Life</button>
-            </div>
-            {!user && <button onClick={() => supabase.auth.signInWithOAuth({ provider: 'github' })} className="bg-gray-800 px-3 py-1.5 rounded text-xs border border-gray-700">Login</button>}
-          </div>
+          <div className="bg-blue-500/20 p-3 rounded-xl text-blue-400"><CheckCircle /></div>
         </div>
 
-        {loading ? <div className="flex justify-center"><Loader2 className="animate-spin" /></div> : (
-          <>
-            {activeTab === 'dashboard' && (
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                <div className="space-y-6">
-                  {/* COMPONENT: AGENDA */}
-                  <AgendaWidget events={events} onAdd={addEvent} onDelete={deleteEvent} />
-                  {/* COMPONENT: LINKS */}
-                  <LinksWidget links={links} mode={mode} onAdd={addLink} onDelete={deleteLink} />
-                </div>
+        {/* Card 2: Finance */}
+        <div className="bg-slate-800/50 p-6 rounded-2xl border border-white/5 flex items-center justify-between">
+          <div>
+            <p className="text-slate-400 text-sm mb-1">Current Balance</p>
+            <h2 className={`text-3xl font-bold ${stats.balance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              Rp {stats.balance.toLocaleString()}
+            </h2>
+          </div>
+          <div className="bg-emerald-500/20 p-3 rounded-xl text-emerald-400"><Wallet /></div>
+        </div>
 
-                <div className="lg:col-span-3">
-                   {/* COMPONENT: KANBAN */}
-                   <KanbanBoard tasks={tasks} mode={mode} onAdd={addTask} onDelete={deleteTask} onMove={moveTask} />
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'snippets' && (
-               /* COMPONENT: SNIPPETS */
-               <SnippetVault snippets={snippets} onAdd={addSnippet} onDelete={deleteSnippet} />
-            )}
-          </>
-        )}
+        {/* Card 3: Resources */}
+        <div className="bg-slate-800/50 p-6 rounded-2xl border border-white/5 flex items-center justify-between">
+          <div>
+            <p className="text-slate-400 text-sm mb-1">Saved Links</p>
+            <h2 className="text-3xl font-bold">{stats.links}</h2>
+          </div>
+          <div className="bg-purple-500/20 p-3 rounded-xl text-purple-400"><LinkIcon /></div>
+        </div>
       </div>
-    </main>
+      
+      {!user && (
+        <div className="text-center py-10">
+           <button onClick={() => supabase.auth.signInWithOAuth({ provider: 'github' })} className="bg-blue-600 px-6 py-3 rounded-xl font-bold">Login to Start</button>
+        </div>
+      )}
+    </div>
   )
 }
