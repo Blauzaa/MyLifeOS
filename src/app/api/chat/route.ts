@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     const result = await streamText({
       // 🔑 TAMBAHKAN 'as any' DI SINI
       // Ini memberitahu TS untuk mengabaikan perbedaan standar V3 vs V1
-      model: groq('llama3-8b-8192') as any, 
+      model: groq('llama-3.3-70b-versatile') as any,
       messages,
       system: `Anda adalah asisten LifeOS. User ID: ${user?.id ?? 'unknown'}`,
 
