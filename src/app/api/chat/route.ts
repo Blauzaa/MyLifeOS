@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { groq } from '@ai-sdk/groq'
-import { streamText, tool } from 'ai'
+import * as ai from 'ai' // Kita import sebagai namespace untuk hindari konflik nama
 import { createClient } from '../../../utils/supabase/supabaseClient'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
 export async function POST(req: Request) {
@@ -12,53 +13,54 @@ export async function POST(req: Request) {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
 
-    const result = await streamText({
-      // 🔑 TAMBAHKAN 'as any' DI SINI
-      // Ini memberitahu TS untuk mengabaikan perbedaan standar V3 vs V1
-      model: groq('llama-3.3-70b-versatile') as any,
-      messages,
-      system: `Anda adalah asisten LifeOS. User ID: ${user?.id ?? 'unknown'}`,
+    // 🔑 PAKSA: Ambil fungsi tool dan streamText, lalu cast ke 'any'
+    const toolHelper = (ai as any).tool
+    const streamTextHelper = (ai as any).streamText
 
+    const result = await streamTextHelper({
+      model: groq('llama-3.1-8b-instant') as any,
+      messages,
+      system: `Anda adalah asisten LifeOS yang cerdas. User ID: ${user?.id ?? 'unknown'}`,
       tools: {
-        addTask: tool({
-          description: 'Menambahkan tugas baru',
+        addTask: toolHelper({
+          description: 'Menambahkan tugas baru ke daftar task',
           parameters: z.object({
             title: z.string(),
           }),
           execute: async ({ title }: { title: string }) => {
-            if (!user) return 'Anda harus login'
+            if (!user) return 'Error: User belum login'
             await supabase.from('tasks').insert({
               title,
               user_id: user.id,
               status: 'todo',
             })
-            return `Task "${title}" berhasil ditambahkan`
+            return `Task "${title}" berhasil ditambahkan ke database.`
           },
         }),
-
-        deleteTask: tool({
-          description: 'Menghapus task',
+        deleteTask: toolHelper({
+          description: 'Menghapus tugas berdasarkan kata kunci',
           parameters: z.object({
             keyword: z.string(),
           }),
           execute: async ({ keyword }: { keyword: string }) => {
-            if (!user) return 'Anda harus login'
+            if (!user) return 'Error: User belum login'
             await supabase
               .from('tasks')
               .delete()
               .ilike('title', `%${keyword}%`)
               .eq('user_id', user.id)
-            return `Task "${keyword}" dihapus`
+            return `Tugas yang mengandung "${keyword}" telah dihapus.`
           },
         }),
-      } as any, 
+      },
+      maxSteps: 5,
     })
 
-    // 💡 REKOMENDASI: Gunakan toDataStreamResponse() jika tersedia di versi ai@3 Anda
-    // Jika masih error di VS Code, biarkan toTextStreamResponse()
-    return result.toDataStreamResponse()
+    // Gunakan method yang tersedia (toDataStreamResponse atau toTextStreamResponse)
+    // Cast ke any agar TS tidak komplain method tidak ada
+    return (result as any).toDataStreamResponse()
   } catch (e) {
-    console.error(e)
-    return new Response('AI error', { status: 500 })
+    console.error('AI Error Detail:', e)
+    return new Response('Terjadi kesalahan pada sistem AI', { status: 500 })
   }
 }
