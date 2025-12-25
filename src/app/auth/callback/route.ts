@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server'
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
-  // Kalau ada parameter 'next', nanti kita redirect ke sana, kalau tidak ke home (/)
   const next = searchParams.get('next') ?? '/'
 
   if (code) {
@@ -25,22 +24,19 @@ export async function GET(request: Request) {
                 cookieStore.set(name, value, options)
               )
             } catch {
-              // Abaikan error ini kalau dipanggil dari Server Component
+              // Abaikan error
             }
           },
         },
       }
     )
     
-    // Tukar kode GitHub jadi Session Supabase
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     
     if (!error) {
-      // Login sukses! Kembalikan user ke halaman utama
       return NextResponse.redirect(`${origin}${next}`)
     }
   }
 
-  // Kalau gagal, kembalikan ke home juga tapi sebagai error
   return NextResponse.redirect(`${origin}/auth/auth-code-error`)
 }
