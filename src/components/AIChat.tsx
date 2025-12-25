@@ -7,33 +7,12 @@ import { useState } from 'react'
 
 export default function AIChat() {
   const [isOpen, setIsOpen] = useState(false)
-  const [chatInput, setChatInput] = useState('')
-
-  // 🔑 PAKSA DI SINI: Tambahkan 'as any' setelah kurung kurawal tutup options
-  const { messages, append, isLoading }: any = useChat({
+  
+  // 🔑 PAKSA: Tambahkan : any pada destrukturisasi
+  const { messages, input, handleInputChange, handleSubmit, isLoading }: any = useChat({
     api: '/api/chat',
     maxSteps: 5,
-    onError: (err: any) => {
-      console.error("AI ERROR:", err)
-    }
-  } as any) // <--- Tambahkan 'as any' di sini
-
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const messageToSend = chatInput.trim()
-    if (!messageToSend || isLoading) return
-
-    setChatInput('')
-
-    try {
-      await append({
-        role: 'user',
-        content: messageToSend,
-      })
-    } catch (error) {
-      console.error("Gagal mengirim pesan:", error)
-    }
-  }
+  } as any) // 🔑 Dan as any pada objek konfigurasinya
 
   return (
     <div className="fixed bottom-20 md:bottom-6 right-6 z-[100]">
@@ -47,17 +26,17 @@ export default function AIChat() {
             <button onClick={() => setIsOpen(false)}><X size={18}/></button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-950 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-950">
             {messages.length === 0 && (
-              <div className="text-xs text-slate-500 text-center mt-10">
-                <p>&quot;Tambahkan task beli kopi&quot;</p>
+              <div className="text-xs text-slate-500 text-center mt-10 italic">
+                &quot;Tambahkan task beli kopi&quot;
               </div>
             )}
             
             {messages.map((m: any) => (
               <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {m.content && (
-                  <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${
+                  <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${
                     m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-200'
                   }`}>
                     {m.content}
@@ -68,26 +47,20 @@ export default function AIChat() {
             
             {isLoading && (
               <div className="flex justify-start">
-                <div className="bg-slate-800 p-2 rounded-xl">
-                  <Loader2 className="animate-spin text-blue-500" size={16}/>
-                </div>
+                <Loader2 className="animate-spin text-blue-500" size={16}/>
               </div>
             )}
           </div>
 
-          <form onSubmit={handleSendMessage} className="p-4 border-t border-white/5 bg-slate-900">
+          <form onSubmit={handleSubmit} className="p-4 border-t border-white/5 bg-slate-900">
             <div className="flex gap-2">
               <input 
                 className="flex-1 bg-slate-800 text-white rounded-xl px-4 py-2 text-sm outline-none focus:ring-1 ring-blue-500"
-                placeholder="Tanya sesuatu..."
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Tanya LifeOS AI..."
+                value={input}
+                onChange={handleInputChange}
               />
-              <button 
-                type="submit" 
-                disabled={isLoading || !chatInput.trim()} 
-                className="bg-blue-600 p-2 rounded-xl text-white disabled:opacity-50 transition-all active:scale-95"
-              >
+              <button type="submit" disabled={isLoading} className="bg-blue-600 p-2 rounded-xl text-white disabled:opacity-50 transition-all active:scale-95">
                 <Send size={18}/>
               </button>
             </div>
@@ -96,7 +69,7 @@ export default function AIChat() {
       ) : (
         <button 
           onClick={() => setIsOpen(true)}
-          className="bg-blue-600 hover:bg-blue-500 text-white p-4 rounded-full shadow-lg hover:scale-110 transition-all active:scale-95"
+          className="bg-blue-600 hover:bg-blue-500 text-white p-4 rounded-full shadow-lg hover:scale-110 transition-all shadow-blue-900/20 active:scale-95"
         >
           <Bot size={28} />
         </button>
