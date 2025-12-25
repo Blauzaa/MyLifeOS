@@ -1,174 +1,279 @@
 'use client'
-//test
-import { useEffect, useState } from 'react'
-import { createClient } from '../utils/supabase/supabaseClient'
-import { Plus } from 'lucide-react'
 
-// 1. Kita definisikan bentuk datanya supaya TypeScript tidak marah
-interface Item {
+import { useEffect, useState } from 'react'
+import { createClient } from '@/utils/supabase/supabaseClient' // Pastikan path ini sesuai
+import { Plus, Trash2, ArrowRight, CheckCircle, Briefcase, Coffee, Loader2 } from 'lucide-react'
+
+// --- Tipe Data ---
+interface LinkItem {
   id: string
   title: string
   url: string
-  type: string
-  user_id?: string
+  type: string // 'work' | 'life'
+}
+
+interface TaskItem {
+  id: string
+  title: string
+  status: string // 'todo' | 'doing' | 'done'
+  category: string // 'work' | 'life'
 }
 
 export default function Home() {
   const supabase = createClient()
   
-  // State untuk menampung data
-  const [items, setItems] = useState<Item[]>([])
-  const [newItem, setNewItem] = useState('')
-  const [newUrl, setNewUrl] = useState('')
+  // --- STATE ---
+  const [mode, setMode] = useState<'work' | 'life'>('work') // Mode Switcher
+  const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
-  // 2. Ambil data saat web dibuka
+  // Data
+  const [links, setLinks] = useState<LinkItem[]>([])
+  const [tasks, setTasks] = useState<TaskItem[]>([])
+
+  // Input Forms
+  const [newLinkTitle, setNewLinkTitle] = useState('')
+  const [newLinkUrl, setNewLinkUrl] = useState('')
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+
+  // --- 1. LOAD DATA ---
   useEffect(() => {
-    const getData = async () => {
-      // Cek apakah user sudah login
+    const initData = async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      
-      if (!user) {
-        console.log("Belum login, silakan login dulu.")
-      } else {
-        // Ambil data dari tabel dynamic_items
-        const { data, error } = await supabase
+      setUser(user)
+
+      if (user) {
+        // Ambil Links
+        const { data: linkData } = await supabase
           .from('dynamic_items')
           .select('*')
-          .eq('type', 'work') // Filter: ambil yang tipe 'work' saja
-        
-        if (data) {
-          setItems(data as Item[])
-        }
-        if (error) {
-          console.error("Error ambil data:", error)
-        }
+          .order('created_at', { ascending: true })
+        if (linkData) setLinks(linkData as LinkItem[])
+
+        // Ambil Tasks
+        const { data: taskData } = await supabase
+          .from('tasks')
+          .select('*')
+          .order('created_at', { ascending: false })
+        if (taskData) setTasks(taskData as TaskItem[])
       }
       setLoading(false)
     }
+    initData()
+  }, [supabase])
 
-    getData()
-  }, [supabase]) // <-- FIX: Supabase dimasukkan ke sini biar gak warning kuning
+  // --- 2. ACTIONS: LINKS ---
+  const addLink = async () => {
+    if (!newLinkTitle || !newLinkUrl) return
+    const { data, error } = await supabase.from('dynamic_items').insert({
+      title: newLinkTitle, url: newLinkUrl, type: mode, user_id: user.id
+    }).select().single()
 
-  // 3. Fungsi Tambah Data (Dynamic Feature)
-  const addItem = async () => {
-    // Validasi input
-    if (!newItem || !newUrl) return alert('Isi judul dan URL dulu!')
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return alert('Login dulu bos!')
-
-    // Kirim ke Database Supabase
-    const { error } = await supabase.from('dynamic_items').insert({
-      title: newItem,
-      url: newUrl,
-      type: 'work',
-      user_id: user.id
-    })
-
-    if (!error) {
-      // FIX ERROR TYPESCRIPT DI SINI:
-      // Kita buat object sementara yang punya 'id' dan 'type'
-      // agar sesuai dengan Interface Item di atas.
-      const tempItem: Item = {
-        id: Date.now().toString(), // Pakai ID sementara (timestamp) biar unik
-        title: newItem,
-        url: newUrl,
-        type: 'work',
-        user_id: user.id
-      }
-
-      // Update UI langsung
-      setItems([...items, tempItem])
-      
-      // Reset form
-      setNewItem('')
-      setNewUrl('')
-    } else {
-      console.error(error)
-      alert('Gagal simpan ke database!')
+    if (data && !error) {
+      setLinks([...links, data]) // Update UI
+      setNewLinkTitle(''); setNewLinkUrl('')
     }
   }
 
-  // 4. Fungsi Login GitHub
-  const handleLogin = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'github',
-      options: {
-        redirectTo: `${location.origin}/auth/callback`, // Opsional, agar balik ke halaman ini
-      },
-    })
+  const deleteLink = async (id: string) => {
+    const { error } = await supabase.from('dynamic_items').delete().eq('id', id)
+    if (!error) setLinks(links.filter(l => l.id !== id))
   }
 
+  // --- 3. ACTIONS: TASKS ---
+  const addTask = async () => {
+    if (!newTaskTitle) return
+    const { data, error } = await supabase.from('tasks').insert({
+      title: newTaskTitle, status: 'todo', category: mode, user_id: user.id
+    }).select().single()
+
+    if (data && !error) {
+      setTasks([data, ...tasks])
+      setNewTaskTitle('')
+    }
+  }
+
+  const deleteTask = async (id: string) => {
+    const { error } = await supabase.from('tasks').delete().eq('id', id)
+    if (!error) setTasks(tasks.filter(t => t.id !== id))
+  }
+
+  const moveTask = async (id: string, currentStatus: string) => {
+    let nextStatus = 'doing'
+    if (currentStatus === 'doing') nextStatus = 'done'
+    
+    // Optimistic Update (Update UI dulu biar cepat)
+    setTasks(tasks.map(t => t.id === id ? { ...t, status: nextStatus } : t))
+
+    // Update DB
+    await supabase.from('tasks').update({ status: nextStatus }).eq('id', id)
+  }
+
+  // --- 4. FILTERING ---
+  // Kita filter data di frontend berdasarkan Mode yang aktif
+  const activeLinks = links.filter(l => l.type === mode)
+  const activeTasks = tasks.filter(t => t.category === mode)
+
+  const todos = activeTasks.filter(t => t.status === 'todo')
+  const doings = activeTasks.filter(t => t.status === 'doing')
+  const dones = activeTasks.filter(t => t.status === 'done')
+
+  // --- RENDER UI ---
   return (
-    <main className="min-h-screen bg-gray-950 text-gray-100 p-4 md:p-8 font-sans">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-            My LifeOS 🚀
-          </h1>
-          <button 
-            onClick={handleLogin}
-            className="text-sm bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded border border-gray-700 transition"
-          >
-            Login / Sync
-          </button>
-        </div>
+    <main className={`min-h-screen transition-colors duration-500 ${mode === 'work' ? 'bg-slate-950 text-slate-100' : 'bg-stone-900 text-stone-100'} p-4 md:p-8 font-sans`}>
+      <div className="max-w-6xl mx-auto">
         
-        {/* Widget: Work Links */}
-        <div className="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl">
-          <h2 className="text-xl font-semibold mb-6 flex items-center gap-2 text-blue-400">
-            🏢 Work Mode
-          </h2>
-          
-          {/* Loading State */}
-          {loading && <p className="text-gray-500 text-sm">Sedang memuat data...</p>}
-
-          {/* List Link */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-            {items.map((item) => (
-              <a 
-                key={item.id} 
-                href={item.url} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="group flex items-center gap-3 bg-gray-800/50 hover:bg-gray-800 p-4 rounded-xl border border-gray-700/50 hover:border-blue-500/50 transition-all duration-200"
-              >
-                <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 group-hover:scale-110 transition">
-                  {/* Ikon Link Sederhana */}
-                  🔗
-                </div>
-                <span className="font-medium truncate text-gray-300 group-hover:text-white">
-                  {item.title}
-                </span>
-              </a>
-            ))}
+        {/* HEADER & LOGIN */}
+        <div className="flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+              {mode === 'work' ? '🚀 Work OS' : '🏡 Life OS'}
+            </h1>
+            <p className="text-sm opacity-60">Welcome back, {user?.email || 'Guest'}</p>
           </div>
-
-          {/* Input Form (Add New) */}
-          <div className="flex flex-col sm:flex-row gap-2 bg-gray-950/50 p-2 rounded-xl border border-dashed border-gray-700">
-            <input 
-              className="bg-transparent px-4 py-2 rounded-lg w-full focus:outline-none focus:bg-gray-800 text-sm"
-              placeholder="Nama Link (misal: GitHub Kantor)"
-              value={newItem} 
-              onChange={e => setNewItem(e.target.value)}
-            />
-            <div className="w-[1px] bg-gray-700 hidden sm:block"></div>
-            <input 
-              className="bg-transparent px-4 py-2 rounded-lg w-full focus:outline-none focus:bg-gray-800 text-sm"
-              placeholder="URL (https://...)"
-              value={newUrl} 
-              onChange={e => setNewUrl(e.target.value)}
-            />
-            <button 
-              onClick={addItem} 
-              className="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-lg flex items-center justify-center min-w-[40px] transition"
-            >
-              <Plus size={20} />
-            </button>
+          
+          <div className="flex items-center gap-3">
+            {/* Mode Toggle */}
+            <div className="bg-white/10 p-1 rounded-lg flex">
+              <button 
+                onClick={() => setMode('work')}
+                className={`px-4 py-2 rounded-md flex items-center gap-2 text-sm transition ${mode === 'work' ? 'bg-blue-600 text-white shadow-lg' : 'hover:bg-white/5 opacity-50'}`}
+              >
+                <Briefcase size={16} /> Work
+              </button>
+              <button 
+                onClick={() => setMode('life')}
+                className={`px-4 py-2 rounded-md flex items-center gap-2 text-sm transition ${mode === 'life' ? 'bg-emerald-600 text-white shadow-lg' : 'hover:bg-white/5 opacity-50'}`}
+              >
+                <Coffee size={16} /> Life
+              </button>
+            </div>
+            
+            {!user && (
+              <button onClick={() => supabase.auth.signInWithOAuth({ provider: 'github' })} className="bg-gray-800 px-4 py-2 rounded text-sm border border-gray-700">
+                Login
+              </button>
+            )}
           </div>
         </div>
+
+        {loading ? (
+          <div className="flex justify-center mt-20"><Loader2 className="animate-spin" /></div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            
+            {/* --- KOLOM KIRI: LINKS (Smart Links) --- */}
+            <div className="lg:col-span-4 space-y-6">
+              <div className="bg-white/5 p-6 rounded-2xl border border-white/10">
+                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 opacity-80">
+                  🔗 Quick Links
+                </h2>
+                
+                <div className="space-y-3">
+                  {activeLinks.map(link => (
+                    <div key={link.id} className="group flex items-center justify-between bg-black/20 hover:bg-black/40 p-3 rounded-xl border border-white/5 transition">
+                      <a href={link.url} target="_blank" className="flex-1 truncate text-sm font-medium text-blue-300 hover:underline">
+                        {link.title}
+                      </a>
+                      <button onClick={() => deleteLink(link.id)} className="opacity-0 group-hover:opacity-100 text-red-400 hover:bg-red-500/20 p-2 rounded transition">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  {activeLinks.length === 0 && <p className="text-xs opacity-40 italic">Belum ada link.</p>}
+                </div>
+
+                {/* Add Link Form */}
+                <div className="mt-4 pt-4 border-t border-white/10 flex flex-col gap-2">
+                  <input 
+                    value={newLinkTitle} onChange={e => setNewLinkTitle(e.target.value)}
+                    placeholder="Nama Link" className="bg-black/30 px-3 py-2 rounded text-sm border border-transparent focus:border-blue-500 outline-none"
+                  />
+                  <div className="flex gap-2">
+                    <input 
+                      value={newLinkUrl} onChange={e => setNewLinkUrl(e.target.value)}
+                      placeholder="URL..." className="bg-black/30 px-3 py-2 rounded text-sm flex-1 border border-transparent focus:border-blue-500 outline-none"
+                    />
+                    <button onClick={addLink} className="bg-blue-600 hover:bg-blue-500 px-3 rounded flex items-center justify-center">
+                      <Plus size={18} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* --- KOLOM KANAN: TASKS (Kanban) --- */}
+            <div className="lg:col-span-8">
+              {/* Input Task Baru */}
+              <div className="mb-6 flex gap-2">
+                <input 
+                  value={newTaskTitle} onChange={e => setNewTaskTitle(e.target.value)}
+                  placeholder={`Apa target ${mode} hari ini?`} 
+                  className="bg-white/5 w-full px-4 py-3 rounded-xl border border-white/10 focus:border-blue-500 outline-none text-lg"
+                  onKeyDown={e => e.key === 'Enter' && addTask()}
+                />
+                <button onClick={addTask} className="bg-white/10 hover:bg-white/20 px-6 rounded-xl font-medium transition">
+                  Add
+                </button>
+              </div>
+
+              {/* Kanban Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                
+                {/* 1. TO DO */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider opacity-50 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-slate-500"></span> To Do ({todos.length})
+                  </h3>
+                  {todos.map(t => (
+                    <div key={t.id} className="bg-white/5 p-4 rounded-xl border border-white/5 hover:border-white/20 group transition">
+                      <p className="mb-3 font-medium">{t.title}</p>
+                      <div className="flex justify-between items-center">
+                        <button onClick={() => deleteTask(t.id)} className="text-red-400 opacity-0 group-hover:opacity-100 hover:bg-red-900/30 p-1.5 rounded transition"><Trash2 size={14} /></button>
+                        <button onClick={() => moveTask(t.id, 'todo')} className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded hover:bg-blue-500/40 flex items-center gap-1">
+                          Start <ArrowRight size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 2. DOING */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider opacity-50 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-blue-500"></span> Doing ({doings.length})
+                  </h3>
+                  {doings.map(t => (
+                    <div key={t.id} className="bg-blue-500/10 p-4 rounded-xl border border-blue-500/30 relative">
+                      <div className="absolute -left-1 top-4 w-1 h-8 bg-blue-500 rounded-r"></div>
+                      <p className="mb-3 font-medium text-blue-100">{t.title}</p>
+                      <div className="flex justify-end items-center">
+                        <button onClick={() => moveTask(t.id, 'doing')} className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded hover:bg-emerald-500/40 flex items-center gap-1">
+                          Done <CheckCircle size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 3. DONE */}
+                <div className="space-y-3 opacity-60 hover:opacity-100 transition">
+                  <h3 className="text-xs font-bold uppercase tracking-wider opacity-50 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Done ({dones.length})
+                  </h3>
+                  {dones.map(t => (
+                    <div key={t.id} className="bg-white/5 p-3 rounded-lg border border-white/5 flex justify-between items-center group">
+                      <p className="text-sm line-through decoration-white/30">{t.title}</p>
+                      <button onClick={() => deleteTask(t.id)} className="text-gray-500 hover:text-red-400"><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+        )}
       </div>
     </main>
   )
