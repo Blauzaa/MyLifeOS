@@ -1,10 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient } from '@/utils/supabase/supabaseClient' // Pastikan path ini sesuai
+// FIX 1: Import tipe data User dari library Supabase
+import { User } from '@supabase/supabase-js'
+// FIX 2: Path menggunakan titik dua (..) sesuai struktur folder Anda
+import { createClient } from '../utils/supabase/supabaseClient' 
 import { Plus, Trash2, ArrowRight, CheckCircle, Briefcase, Coffee, Loader2 } from 'lucide-react'
 
-// --- Tipe Data ---
+// --- Tipe Data Custom ---
 interface LinkItem {
   id: string
   title: string
@@ -23,8 +26,11 @@ export default function Home() {
   const supabase = createClient()
   
   // --- STATE ---
-  const [mode, setMode] = useState<'work' | 'life'>('work') // Mode Switcher
-  const [user, setUser] = useState<any>(null)
+  const [mode, setMode] = useState<'work' | 'life'>('work')
+  
+  // FIX 3: Ganti <any> dengan <User | null>
+  const [user, setUser] = useState<User | null>(null)
+  
   const [loading, setLoading] = useState(true)
 
   // Data
@@ -40,7 +46,7 @@ export default function Home() {
   useEffect(() => {
     const initData = async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      setUser(user)
+      setUser(user) // Sekarang aman karena tipenya sudah cocok
 
       if (user) {
         // Ambil Links
@@ -65,12 +71,14 @@ export default function Home() {
   // --- 2. ACTIONS: LINKS ---
   const addLink = async () => {
     if (!newLinkTitle || !newLinkUrl) return
+    if (!user) return alert("Login dulu!")
+
     const { data, error } = await supabase.from('dynamic_items').insert({
       title: newLinkTitle, url: newLinkUrl, type: mode, user_id: user.id
     }).select().single()
 
     if (data && !error) {
-      setLinks([...links, data]) // Update UI
+      setLinks([...links, data as LinkItem]) 
       setNewLinkTitle(''); setNewLinkUrl('')
     }
   }
@@ -83,12 +91,14 @@ export default function Home() {
   // --- 3. ACTIONS: TASKS ---
   const addTask = async () => {
     if (!newTaskTitle) return
+    if (!user) return alert("Login dulu!")
+
     const { data, error } = await supabase.from('tasks').insert({
       title: newTaskTitle, status: 'todo', category: mode, user_id: user.id
     }).select().single()
 
     if (data && !error) {
-      setTasks([data, ...tasks])
+      setTasks([data as TaskItem, ...tasks])
       setNewTaskTitle('')
     }
   }
@@ -102,7 +112,7 @@ export default function Home() {
     let nextStatus = 'doing'
     if (currentStatus === 'doing') nextStatus = 'done'
     
-    // Optimistic Update (Update UI dulu biar cepat)
+    // Optimistic Update
     setTasks(tasks.map(t => t.id === id ? { ...t, status: nextStatus } : t))
 
     // Update DB
@@ -110,7 +120,6 @@ export default function Home() {
   }
 
   // --- 4. FILTERING ---
-  // Kita filter data di frontend berdasarkan Mode yang aktif
   const activeLinks = links.filter(l => l.type === mode)
   const activeTasks = tasks.filter(t => t.category === mode)
 
@@ -162,7 +171,7 @@ export default function Home() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             
-            {/* --- KOLOM KIRI: LINKS (Smart Links) --- */}
+            {/* --- KOLOM KIRI: LINKS --- */}
             <div className="lg:col-span-4 space-y-6">
               <div className="bg-white/5 p-6 rounded-2xl border border-white/10">
                 <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 opacity-80">
@@ -202,7 +211,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* --- KOLOM KANAN: TASKS (Kanban) --- */}
+            {/* --- KOLOM KANAN: TASKS --- */}
             <div className="lg:col-span-8">
               {/* Input Task Baru */}
               <div className="mb-6 flex gap-2">
