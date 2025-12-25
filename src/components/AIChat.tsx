@@ -54,19 +54,24 @@ export default function AIChat() {
             )}
           </div>
 
-          <form onSubmit={handleSubmit} className="p-4 border-t border-white/5 bg-slate-900">
+            <form onSubmit={handleSubmit} className="p-4 border-t border-white/5 bg-slate-900">
             <div className="flex gap-2">
-              <input 
+                <input 
                 className="flex-1 bg-slate-800 text-white rounded-xl px-4 py-2 text-sm outline-none focus:ring-1 ring-blue-500"
                 placeholder="Tanya LifeOS AI..."
                 value={input}
                 onChange={handleInputChange}
-              />
-              <button type="submit" disabled={isLoading} className="bg-blue-600 p-2 rounded-xl text-white disabled:opacity-50 transition-transform active:scale-95">
+                />
+                {/* PENTING: Pastikan type="submit" agar onSubmit di form terpicu */}
+                <button 
+                type="submit" 
+                disabled={isLoading} 
+                className="bg-blue-600 p-2 rounded-xl text-white disabled:opacity-50"
+                >
                 <Send size={18}/>
-              </button>
+                </button>
             </div>
-          </form>
+            </form>
         </div>
       ) : (
         <button 

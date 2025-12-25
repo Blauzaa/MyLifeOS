@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
 export async function POST(req: Request) {
+    console.log(">>> API CHAT DIPANGGIL! <<<");
   try {
     const { messages } = await req.json()
     const supabase = createClient()
