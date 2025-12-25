@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient } from '../utils/supabase/supabaseClient'
+import { createClient } from '../utils/supabase/client'
 import { Wallet, CheckCircle, Link as LinkIcon } from 'lucide-react' // Hapus arrow yang ga kepake
 import { User } from '@supabase/supabase-js' // Import tipe User
 

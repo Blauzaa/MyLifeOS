@@ -1,54 +1,49 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { groq } from '@ai-sdk/groq';
 import { streamText, tool } from 'ai';
-import { createClient } from '../../../utils/supabase/supabaseClient'; 
 import { z } from 'zod';
+// Import dari file SERVER (Langkah 1B)
+import { createClient } from '../../../utils/supabase/server'; 
 
-export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
   try {
     const { messages } = await req.json();
-    const supabase = createClient();
+
+    // Init Supabase di Server
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
-    // PAKSA: Gunakan (streamText as any) untuk melewati validasi overload
-    const result = await (streamText as any)({
-      model: groq('llama-3.1-8b-instant') as any,
+    const result = streamText({
+      model: groq('llama-3.1-8b-instant'),
       messages,
-      system: `Anda adalah asisten LifeOS cerdas. User ID: ${user?.id ?? 'unknown'}`,
+      system: `Kamu asisten LifeOS. User ID: ${user?.id ?? 'Guest'}.`,
+      maxSteps: 5, // Mengizinkan AI berpikir beberapa langkah (multi-step)
       tools: {
-        addTask: (tool as any)({
-          description: 'Menambahkan tugas baru ke daftar task',
+        addTask: tool({
+          description: 'Catat tugas baru ke database',
           parameters: z.object({
-            title: z.string(),
+            title: z.string().describe('Judul tugas'),
           }),
-          execute: async ({ title }: { title: string }) => {
-            if (!user) return 'Error: Login dulu';
-            await supabase.from('tasks').insert({ title, user_id: user.id, status: 'todo' });
-            return `Task "${title}" sukses ditambahkan!`;
-          },
-        }),
-        deleteTask: (tool as any)({
-          description: 'Menghapus tugas berdasarkan kata kunci',
-          parameters: z.object({
-            keyword: z.string(),
-          }),
-          execute: async ({ keyword }: { keyword: string }) => {
-            if (!user) return 'Error: Login dulu';
-            await supabase.from('tasks').delete().ilike('title', `%${keyword}%`).eq('user_id', user.id);
-            return `Tugas "${keyword}" sudah dihapus!`;
+          execute: async ({ title }) => {
+            // Logic database aman di sini karena berjalan di server
+            if (!user) return 'Gagal: Harap login dahulu.';
+            
+            const { error } = await supabase
+              .from('tasks')
+              .insert({ title, user_id: user.id, status: 'todo' });
+
+            return error ? `Error: ${error.message}` : `Berhasil mencatat: "${title}"`;
           },
         }),
       },
-      maxSteps: 5,
     });
 
-    // PAKSA: Cast result ke any agar toDataStreamResponse tidak merah
-    return (result as any).toDataStreamResponse();
-  } catch (e) {
-    console.error(e);
-    return new Response('AI Error', { status: 500 });
+    // Return format data stream terbaru
+    return result.toDataStreamResponse();
+    
+  } catch (error) {
+    console.error('API Error:', error);
+    return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 });
   }
 }

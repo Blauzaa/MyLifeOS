@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { createClient } from '../../utils/supabase/supabaseClient'
+import { createClient } from '../../utils/supabase/client'
 import { Plus, Trash2, Save, Image as ImageIcon, Loader2, FileText, Search, X } from 'lucide-react'
 import imageCompression from 'browser-image-compression'
 

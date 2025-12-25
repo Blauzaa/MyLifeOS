@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { createClient } from '../../utils/supabase/supabaseClient'
+import { createClient } from '../../utils/supabase/client'
 import { Plus, Trash2, ArrowRight, CheckCircle, Clock, Loader2 } from 'lucide-react'
 
 const supabase = createClient()

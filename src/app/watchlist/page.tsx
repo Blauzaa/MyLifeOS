@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '../../utils/supabase/supabaseClient'
+import { createClient } from '../../utils/supabase/client'
 import { 
   Plus, Search, Trash2, PlayCircle, CheckCircle2, 
   Clock, X, Film, Tv, Ghost, Loader2

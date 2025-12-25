@@ -12,7 +12,7 @@ import {
   Tv,
   FileText // Tambahkan icon baru untuk Notes
 } from 'lucide-react'
-import { createClient } from '../utils/supabase/supabaseClient'
+import { createClient } from '../utils/supabase/client'
 
 // Definisi menu yang sesuai dengan folder di src/app
 const menus = [

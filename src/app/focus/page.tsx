@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/immutability */
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '../../utils/supabase/supabaseClient'
+import { createClient } from '../../utils/supabase/client'
 import { Play, Pause, RotateCcw, Trophy, Loader2, History } from 'lucide-react'
 
 const supabase = createClient()
