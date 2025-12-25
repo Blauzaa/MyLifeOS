@@ -1,5 +1,5 @@
 'use client'
-
+// Update tampilan v1
 import { useEffect, useState } from 'react'
 import { createClient } from '../utils/supabase/supabaseClient'
 import { Plus } from 'lucide-react'
