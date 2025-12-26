@@ -4,7 +4,7 @@ import { createClient } from '../../utils/supabase/client'
 import { 
   Plus, Trash2, CheckCircle, Clock, Loader2, 
   Calendar, CheckSquare, X, AlertCircle, Image as ImageIcon,
-  MoreHorizontal, Link as LinkIcon
+  Link as LinkIcon
 } from 'lucide-react'
 import { useModal } from '../../context/ModalContext'
 
@@ -48,25 +48,31 @@ interface Task {
   status: 'todo' | 'doing' | 'done'
   priority: 'low' | 'medium' | 'high'
   deadline?: string
-  cover_url?: string // NEW: Untuk requirement #10 (Image Link)
+  cover_url?: string
   created_at: string
   subtasks: Subtask[]
   position?: number
 }
 
-// --- COMPONENTS ---
-
-// 1. IMPROVED TASK EDIT MODAL (Notion/Trello Style)
+// ==========================================
+// 1. IMPROVED TASK EDIT MODAL
+// ==========================================
 const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => void, onUpdate: () => void }) => {
   const [localTask, setLocalTask] = useState<Task>(task)
   const [subtaskInput, setSubtaskInput] = useState('')
-  const [showUrlInput, setShowUrlInput] = useState(false) // Toggle input gambar
+  const [showUrlInput, setShowUrlInput] = useState(false)
 
-  // Update helper
+  // HANDLE ESC KEY
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const updateTaskField = async (field: Partial<Task>) => {
-    // Optimistic UI update
     setLocalTask(prev => ({ ...prev, ...field }))
-    
     const { error } = await supabase.from('tasks').update(field).eq('id', task.id)
     if (!error) onUpdate()
   }
@@ -104,23 +110,35 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
   }
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-slate-900 border border-white/10 w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
+      {/* Container Modal (Stop Propagation agar klik di dalam tidak menutup modal) */}
+      <div 
+        className="relative bg-slate-900 border border-white/10 w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()} 
+      >
         
+        {/* CLOSE BUTTON (FIXED POSITION) */}
+        <button 
+            onClick={onClose} 
+            className="absolute top-3 right-3 z-50 p-2 bg-black/50 hover:bg-red-500/80 text-white rounded-full transition-all backdrop-blur-md group shadow-lg border border-white/10"
+            title="Close (Esc)"
+        >
+            <X size={18} className="group-hover:rotate-90 transition-transform"/>
+        </button>
+
         {/* Cover Image Area */}
-        <div className="relative h-32 bg-slate-800/50 border-b border-white/5 group">
+        <div className="relative h-32 bg-slate-800/50 border-b border-white/5 group flex-shrink-0">
             {localTask.cover_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={localTask.cover_url} alt="Cover" className="w-full h-full object-cover opacity-80" />
             ) : (
-                <div className="w-full h-full flex items-center justify-center text-slate-600 text-sm">
+                <div className="w-full h-full flex items-center justify-center text-slate-600 text-sm bg-slate-950">
                     <ImageIcon size={20} className="mr-2"/> No Cover Image
                 </div>
             )}
             
-            {/* Image URL Input Toggle */}
-            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                 <button onClick={() => setShowUrlInput(!showUrlInput)} className="bg-black/50 hover:bg-black/70 text-white px-3 py-1 rounded-full text-xs flex items-center backdrop-blur-md">
+            <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                 <button onClick={() => setShowUrlInput(!showUrlInput)} className="bg-black/60 hover:bg-black/80 text-white px-3 py-1 rounded-full text-xs flex items-center backdrop-blur-md border border-white/10">
                     <LinkIcon size={12} className="mr-1"/> {localTask.cover_url ? 'Change Cover' : 'Add Cover'}
                  </button>
             </div>
@@ -144,11 +162,12 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
                             setShowUrlInput(false)
                         }
                     }}
+                    autoFocus
                 />
             </div>
         )}
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col md:flex-row">
+        <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col md:flex-row bg-slate-900">
             {/* LEFT COLUMN: Main Content */}
             <div className="flex-1 p-6 border-r border-white/5">
                 <input 
@@ -174,7 +193,7 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
                     </div>
 
                     <div>
-                         <div className="flex justify-between items-center mb-3">
+                          <div className="flex justify-between items-center mb-3">
                             <label className="text-xs text-slate-400 uppercase font-bold flex items-center gap-2">
                                 <CheckSquare size={14} /> Subtasks
                             </label>
@@ -222,12 +241,8 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
             </div>
 
             {/* RIGHT COLUMN: Metadata */}
-            <div className="w-full md:w-64 bg-slate-900/50 p-6 space-y-6">
-                 <button onClick={onClose} className="absolute top-4 right-4 p-2 hover:bg-white/10 rounded-full transition z-10 text-white shadow-lg bg-black/20">
-                    <X size={20} />
-                 </button>
-
-                 <div className="space-y-4 pt-8 md:pt-0">
+            <div className="w-full md:w-64 bg-slate-900/50 p-6 space-y-6 border-l border-white/5">
+                 <div className="space-y-4 pt-4 md:pt-0">
                      <div className="space-y-1">
                         <label className="text-xs text-slate-500 font-bold uppercase">Status</label>
                         <select 
@@ -272,7 +287,9 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
   )
 }
 
-// 2. IMPROVED SORTABLE TASK CARD
+// ==========================================
+// 2. SORTABLE TASK CARD
+// ==========================================
 const SortableTaskCard = ({ task, onClick, onDeleteRequest }: { task: Task, onClick: () => void, onDeleteRequest: (id: string) => void }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id, data: { ...task } });
 
@@ -289,7 +306,6 @@ const SortableTaskCard = ({ task, onClick, onDeleteRequest }: { task: Task, onCl
     <div ref={setNodeRef} style={style} {...attributes} {...listeners} onClick={onClick}
       className={`group bg-slate-900 border border-white/5 rounded-xl hover:border-blue-500/50 transition-all shadow-md hover:shadow-xl cursor-grab active:cursor-grabbing relative overflow-hidden touch-none flex flex-col`}
     >
-      {/* Cover Image Rendering (Req #10) */}
       {task.cover_url && (
          <div className="h-24 w-full overflow-hidden border-b border-white/5 bg-slate-800">
              {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -327,7 +343,9 @@ const SortableTaskCard = ({ task, onClick, onDeleteRequest }: { task: Task, onCl
   )
 }
 
-// 3. COLUMN CONTAINER WITH ANIMATION
+// ==========================================
+// 3. TASK COLUMN
+// ==========================================
 const TaskColumn = ({ title, status, icon: Icon, color, tasks, onTaskClick, onDeleteRequest, delay }: any) => {
     const { setNodeRef } = useSortable({ id: status, data: { type: 'container', status } });
     const filteredTasks = tasks.filter((t: Task) => t.status === status);
@@ -362,7 +380,9 @@ const TaskColumn = ({ title, status, icon: Icon, color, tasks, onTaskClick, onDe
     )
 }
 
-// --- MAIN PAGE ---
+// ==========================================
+// 4. MAIN PAGE
+// ==========================================
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -388,13 +408,11 @@ export default function TasksPage() {
 
   useEffect(() => { fetchTasks() }, [fetchTasks])
 
-  // --- CRUD Logic ---
   const addTask = async () => {
     if (!newTask) return
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     
-    // Default task with empty cover_url
     const { error } = await supabase.from('tasks').insert({ 
         title: newTask, status: 'todo', user_id: user.id, priority: 'medium' 
     })
@@ -402,7 +420,6 @@ export default function TasksPage() {
     if (!error) { setNewTask(''); fetchTasks() }
   }
 
-  // REQ #8: Modal Confirmation for Delete
   const handleDeleteRequest = (id: string) => {
     showModal({
       title: 'Delete Task',
@@ -416,7 +433,6 @@ export default function TasksPage() {
     })
   }
 
-  // --- DRAG AND DROP HANDLERS (Same Logic) ---
   const handleDragStart = (event: DragStartEvent) => setActiveId(event.active.id as string);
 
   const handleDragOver = (event: DragOverEvent) => {
@@ -471,23 +487,36 @@ export default function TasksPage() {
 
     if (!item || !targetStatus) return;
 
-    // REQ #8: Modal Confirmation for Logic Validation
+    // --- CHECK: Unfinished Subtasks Logic ---
     if (targetStatus === 'done' && item.subtasks.length > 0) {
         const hasIncompleteSubtasks = item.subtasks.some(s => !s.is_completed);
+        
         if (hasIncompleteSubtasks) {
+           // 1. REVERT: Force status back to original (from before drag started)
+           // active.data.current holds the state when drag BEGAN
+           const originalStatus = active.data.current?.status || 'todo';
+           
+           setTasks((prev) => {
+             return prev.map(t => t.id === activeId ? { ...t, status: originalStatus } : t);
+           });
+
+           // 2. ASK CONFIRMATION
            showModal({
              title: 'Unfinished Work',
-             message: `"${item.title}" still has pending subtasks. Mark as done anyway?`,
+             message: `"${item.title}" still has pending subtasks. Do you want to force complete it?`,
              type: 'warning',
              confirmText: 'Force Complete',
              onConfirm: async () => {
+                // 3. IF CONFIRM: Update to Done
                 await updateTaskStatusAndOrder(activeId, 'done');
              }
+             // IF CANCEL: Do nothing (already reverted in step 1)
            })
-           // Revert visual drag if cancelled (by not calling update) happens naturally as state isn't persisted without confirm
            return; 
         }
     }
+    
+    // Normal update
     await updateTaskStatusAndOrder(activeId, targetStatus as string);
   };
 
