@@ -1,8 +1,13 @@
 'use client'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '../../utils/supabase/client'
 import { Plus, Trash2, Save, Image as ImageIcon, Loader2, Cloud } from 'lucide-react'
 import imageCompression from 'browser-image-compression'
+
+// --- TIPTAP IMPORTS ---
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import ImageExtension from '@tiptap/extension-image'
 
 const supabase = createClient()
 
@@ -22,9 +27,29 @@ export default function NotesPage() {
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
   
   const [editTitle, setEditTitle] = useState('')
-  const [editContent, setEditContent] = useState('')
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // --- SETUP EDITOR TIPTAP ---
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      ImageExtension.configure({
+        inline: true,
+        allowBase64: true,
+        HTMLAttributes: {
+          class: 'rounded-xl max-w-full my-4 border border-white/10 shadow-lg', // Styling gambar otomatis
+        },
+      }),
+    ],
+    editorProps: {
+      attributes: {
+        class: 'prose prose-invert max-w-none focus:outline-none min-h-[300px]', // Styling area ketik
+      },
+    },
+    onUpdate: ({ editor }) => {
+      // Trigger auto save saat ngetik
+      setSaveStatus('unsaved') 
+    },
+  })
 
   // 1. FETCH DATA
   const fetchNotes = useCallback(async () => {
@@ -35,6 +60,14 @@ export default function NotesPage() {
 
   useEffect(() => { fetchNotes() }, [fetchNotes])
 
+  // Sync Editor Content saat Note dipilih
+  useEffect(() => {
+    if (editor && selectedNote) {
+      // Set konten HTML ke editor (Render gambar jadi visual)
+      editor.commands.setContent(selectedNote.content || '')
+    }
+  }, [selectedNote, editor])
+
   // ============================================================
   // 2. FUNGSI UPLOAD KE CLOUDINARY
   // ============================================================
@@ -44,87 +77,83 @@ export default function NotesPage() {
     try {
       setIsUploading(true)
       
-      // A. Kompresi Gambar (Biar upload cepet & hemat kuota Cloudinary)
       const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1200, useWebWorker: true }
       const compressedFile = await imageCompression(file, options)
       
-      // B. Siapkan Data
       const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
       const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET
       
-      if (!cloudName || !uploadPreset) {
-        throw new Error("Cloudinary Config (Cloud Name / Preset) belum diset di .env")
-      }
+      if (!cloudName || !uploadPreset) throw new Error("Config Cloudinary missing")
 
       const formData = new FormData()
       formData.append('file', compressedFile)
-      formData.append('upload_preset', uploadPreset) // Wajib untuk Unsigned Upload
+      formData.append('upload_preset', uploadPreset) 
       
-      // C. Kirim ke Cloudinary API
       const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
         method: 'POST',
         body: formData
       })
 
       const result = await response.json()
+      if (!response.ok) throw new Error(result.error?.message)
 
-      if (!response.ok) {
-        throw new Error(result.error?.message || "Gagal upload ke Cloudinary")
-      }
-
-      // D. Ambil Secure URL (HTTPS)
       return result.secure_url 
       
     } catch (err) {
-      console.error("Upload failed", err)
-      alert("Gagal upload gambar! Cek console untuk detail.")
+      console.error(err)
+      alert("Gagal upload gambar")
       return null
     } finally {
       setIsUploading(false)
     }
   }
 
-  // 3. INSERT TEXT LOGIC
-  const insertTextAtCursor = (text: string) => {
-    const textarea = textareaRef.current
-    if (!textarea) {
-      setEditContent(prev => prev + text)
-      return
+  // ============================================================
+  // 3. FUNGSI HAPUS GAMBAR DARI CLOUDINARY
+  // ============================================================
+  const deleteImagesFromCloudinary = async (htmlContent: string) => {
+    // Cari semua URL gambar Cloudinary di dalam konten HTML
+    const regex = /res\.cloudinary\.com\/[^/]+\/image\/upload\/v\d+\/([^/.]+)/g;
+    let match;
+    const publicIds = [];
+
+    while ((match = regex.exec(htmlContent)) !== null) {
+      publicIds.push(match[1]); // Ambil Public ID
     }
 
-    const start = textarea.selectionStart
-    const end = textarea.selectionEnd
-    const currentText = editContent
-    
-    const newText = currentText.substring(0, start) + text + currentText.substring(end)
-    setEditContent(newText)
+    if (publicIds.length === 0) return;
 
-    setTimeout(() => {
-      textarea.selectionStart = textarea.selectionEnd = start + text.length
-      textarea.focus()
-    }, 0)
+    // Panggil API Backend Next.js kita untuk hapus gambar
+    await Promise.all(publicIds.map(async (id) => {
+      await fetch('/api/cloudinary/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ public_id: id })
+      });
+    }));
   }
 
   // 4. SAVE LOGIC
-  const saveToDb = async (noteId: string | undefined, title: string, content: string) => {
+  const saveToDb = async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    if (!user || !editor) return
 
     setSaveStatus('saving')
+    const contentHtml = editor.getHTML() // Ambil isi editor sebagai HTML
 
     try {
-      if (noteId) {
+      if (selectedNote) {
         await supabase.from('notes').update({ 
-          title, 
-          content, 
+          title: editTitle, 
+          content: contentHtml, 
           updated_at: new Date() 
-        }).eq('id', noteId)
+        }).eq('id', selectedNote.id)
 
-        setNotes(prev => prev.map(n => n.id === noteId ? { ...n, title, content } : n))
+        setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, title: editTitle, content: contentHtml } : n))
       } else {
         const { data } = await supabase.from('notes').insert({
-          title: title || 'Untitled Note',
-          content,
+          title: editTitle || 'Untitled Note',
+          content: contentHtml,
           user_id: user.id
         }).select().single()
 
@@ -140,66 +169,61 @@ export default function NotesPage() {
     }
   }
 
-  // 5. AUTO SAVE
+  // 5. AUTO SAVE (Debounce)
   useEffect(() => {
-    if (!selectedNote && !editTitle && !editContent) return 
+    if (!selectedNote && !editTitle && editor?.isEmpty) return 
 
+    const contentHtml = editor?.getHTML() || ''
     const isChanged = selectedNote 
-      ? (editTitle !== selectedNote.title || editContent !== selectedNote.content)
-      : (editTitle !== '' || editContent !== '')
+      ? (editTitle !== selectedNote.title || contentHtml !== selectedNote.content)
+      : (editTitle !== '' || !editor?.isEmpty)
 
     if (!isChanged) return
 
-    setSaveStatus('unsaved')
-
     const timer = setTimeout(() => {
-      saveToDb(selectedNote?.id, editTitle, editContent)
-    }, 1000)
+      saveToDb()
+    }, 1500) // Delay save 1.5 detik
 
     return () => clearTimeout(timer)
-  }, [editTitle, editContent, selectedNote])
+  }, [editTitle, editor?.state.doc, selectedNote]) // editor state listener
 
   // 6. EVENT HANDLERS
-  const handlePaste = async (e: React.ClipboardEvent) => {
-    const items = e.clipboardData.items
+  
+  // Handle Paste Gambar
+  const handlePaste = async (e: ClipboardEvent) => {
+    // Tiptap otomatis handle text paste. Kita cuma perlu handle gambar.
+    const items = e.clipboardData?.items
+    if (!items) return
+
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image') !== -1) {
         e.preventDefault()
         const file = items[i].getAsFile()
         if (file) {
           const url = await processAndUploadImage(file)
-          if (url) {
-            // Kita tambahkan styling agar gambar responsif di dalam note
-            const imgTag = `\n<img src="${url}" alt="image" style="max-width:100%; border-radius:12px; margin: 10px 0;" />\n`
-            insertTextAtCursor(imgTag)
+          if (url && editor) {
+            editor.chain().focus().setImage({ src: url }).run() // Masukkan gambar ke editor
           }
         }
       }
     }
   }
 
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault()
-    const files = e.dataTransfer.files
-    if (files && files.length > 0) {
-      const file = files[0]
-      if (file.type.startsWith('image/')) {
-        const url = await processAndUploadImage(file)
-        if (url) {
-          const imgTag = `\n<img src="${url}" alt="image" style="max-width:100%; border-radius:12px; margin: 10px 0;" />\n`
-          insertTextAtCursor(imgTag)
-        }
-      }
-    }
-  }
+  // Setup Paste Listener di Editor
+  useEffect(() => {
+    if (!editor) return
+    const dom = editor.view.dom
+    dom.addEventListener('paste', handlePaste as any)
+    return () => dom.removeEventListener('paste', handlePaste as any)
+  }, [editor])
+
 
   const handleManualUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
+    if (file && editor) {
       const url = await processAndUploadImage(file)
       if (url) {
-        const imgTag = `\n<img src="${url}" alt="image" style="max-width:100%; border-radius:12px; margin: 10px 0;" />\n`
-        insertTextAtCursor(imgTag)
+        editor.chain().focus().setImage({ src: url }).run()
       }
     }
   }
@@ -207,21 +231,32 @@ export default function NotesPage() {
   const createNewNote = () => {
     setSelectedNote(null)
     setEditTitle('')
-    setEditContent('')
+    editor?.commands.clearContent() // Kosongkan editor visual
     setSaveStatus('saved')
     setTimeout(() => document.getElementById('note-title')?.focus(), 100)
   }
 
   const selectNote = (note: Note) => {
+    // Sebelum pindah note, save dulu manual kalau status unsaved (opsional)
     setSelectedNote(note)
     setEditTitle(note.title)
-    setEditContent(note.content || '')
+    // Content di-set via useEffect di atas
     setSaveStatus('saved')
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Hapus catatan ini?")) return
+    if (!confirm("Hapus catatan ini? Gambar di dalamnya juga akan dihapus permanen.")) return
+    
+    // 1. Ambil konten note yg mau dihapus untuk cek gambar
+    const noteToDelete = notes.find(n => n.id === id)
+    if (noteToDelete?.content) {
+      // 2. Hapus gambar di Cloudinary
+      await deleteImagesFromCloudinary(noteToDelete.content)
+    }
+
+    // 3. Hapus data di Supabase
     await supabase.from('notes').delete().eq('id', id)
+    
     if (selectedNote?.id === id) createNewNote()
     setNotes(prev => prev.filter(n => n.id !== id))
   }
@@ -266,7 +301,6 @@ export default function NotesPage() {
         {/* Toolbar */}
         <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
           <div className="flex gap-2 items-center">
-            {/* Indikator Save */}
             <div className="flex items-center gap-2 mr-4 px-3 py-1 rounded-full bg-black/20 border border-white/5">
               {saveStatus === 'saving' && <Loader2 size={14} className="animate-spin text-blue-400"/>}
               {saveStatus === 'saved' && <Cloud size={14} className="text-emerald-400"/>}
@@ -298,33 +332,11 @@ export default function NotesPage() {
           onChange={e => setEditTitle(e.target.value)}
         />
 
-        {/* Textarea dengan Drop & Paste */}
-        <textarea 
-          ref={textareaRef}
-          className="w-full flex-1 bg-transparent px-8 py-4 outline-none resize-none font-mono text-sm leading-relaxed text-slate-300 placeholder:text-slate-700 custom-scrollbar"
-          placeholder="Tulis sesuatu... (Paste gambar atau drag & drop file di sini)"
-          value={editContent}
-          onChange={e => setEditContent(e.target.value)}
-          onPaste={handlePaste}
-          onDrop={handleDrop}
-          onDragOver={e => e.preventDefault()}
-        />
+        {/* TIPTAP EDITOR CONTENT */}
+        <div className="flex-1 overflow-y-auto px-8 py-4 custom-scrollbar cursor-text" onClick={() => editor?.chain().focus().run()}>
+           <EditorContent editor={editor} />
+        </div>
 
-        {/* Preview Kecil di Bawah */}
-        {editContent.includes('<img') && (
-          <div className="h-32 border-t border-white/5 p-4 bg-black/20 overflow-y-auto">
-            <p className="text-[10px] uppercase font-bold text-slate-600 mb-2 flex items-center gap-2">
-              <ImageIcon size={12}/> Attachments in this note
-            </p>
-            <div className="flex gap-2 flex-wrap">
-               {editContent.match(/<img[^>]+src="([^">]+)"/g)?.map((img, i) => (
-                 <div key={i} className="w-16 h-16 rounded-lg overflow-hidden border border-white/10 relative group">
-                    <div dangerouslySetInnerHTML={{__html: img.replace('style="', 'style="width:100%;height:100%;object-fit:cover;')}} />
-                 </div>
-               ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
