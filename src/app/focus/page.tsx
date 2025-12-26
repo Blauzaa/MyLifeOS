@@ -1,229 +1,58 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 'use client'
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { createClient } from '../../utils/supabase/client'
+import { useState } from 'react'
+import { useFocus, MUSIC_TRACKS } from '../../context/FocusContext' // Import dari Context
 import { 
-  Play, Pause, RotateCcw, Trophy, Loader2, History, 
-  Settings, Music, Volume2, VolumeX, Coffee, Brain, 
+  Play, Pause, RotateCcw, Trophy, History, 
+  Settings, Music, Volume2, Coffee, Brain, 
   ChevronRight, ChevronLeft, Zap, CheckCircle2, Repeat
 } from 'lucide-react'
 
-const supabase = createClient()
-
-// --- TIPE DATA ---
-interface FocusSession {
-  id: string
-  task_name: string
-  duration_minutes: number
-  completed_at: string
-}
-
-type TimerMode = 'focus' | 'shortBreak' | 'longBreak'
-
-// --- 1. DAFTAR LAGU (Updated: Lebih Stabil) ---
-const MUSIC_TRACKS = [
-  { name: "Lofi Hip Hop (Stream)", url: "https://stream.zeno.fm/0r0xa792kwzuv", type: 'Radio 🔴' },
-  { name: "Rain Sounds", url: "https://actions.google.com/sounds/v1/weather/rain_heavy_loud.ogg", type: 'Nature 🌧️' },
-  { name: "Relaxing Piano", url: "https://cdn.pixabay.com/audio/2022/03/24/audio_3cb7ae3a96.mp3", type: 'Music 🎹' },
-  { name: "White Noise", url: "https://actions.google.com/sounds/v1/ambiences/white_noise.ogg", type: 'Focus 🧠' },
-  { name: "Forest Night", url: "https://actions.google.com/sounds/v1/nature/crickets_in_the_night_ambience.ogg", type: 'Nature 🦗' },
-  { name: "Cafe Ambience", url: "https://actions.google.com/sounds/v1/ambiences/coffee_shop.ogg", type: 'Ambience ☕' },
-]
-
-// --- 2. ALARM SOUND (Digital Beep - Soft) ---
-// Suara beep digital klasik tapi pendek
-const ALARM_URL = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"
-
 export default function FocusPage() {
-  // --- STATE TIMER ---
-  const [mode, setMode] = useState<TimerMode>('focus')
-  const [timeLeft, setTimeLeft] = useState(25 * 60) // Default 25 min
-  const [isActive, setIsActive] = useState(false)
-  const [cycles, setCycles] = useState(0) // Menghitung berapa kali fokus selesai
-  
-  // --- STATE SETTINGS ---
+  // Ambil semua data dan fungsi dari "Otak Global" (Context)
+  const { 
+    mode, timeLeft, isActive, setIsActive, switchMode,
+    taskName, setTaskName, config, setConfig,
+    isPlayingAudio, toggleAudio, trackIndex, changeTrack, volume, setVolume,
+    sessions, cycles, totalDuration
+  } = useFocus()
+
   const [showSettings, setShowSettings] = useState(false)
-  const [config, setConfig] = useState({
-    focusDuration: 60,      // Default 1 jam (sesuai request)
-    shortBreakDuration: 5,  // Default 5 menit
-    longBreakDuration: 10,  // Default 10 menit
-    longBreakInterval: 3,   // Long break setelah 3 sesi fokus
-    autoStart: false        // Otomatis lanjut timer
-  })
 
-  // --- STATE DATA & AUDIO ---
-  const [taskName, setTaskName] = useState('')
-  const [sessions, setSessions] = useState<FocusSession[]>([])
-  const [loading, setLoading] = useState(true)
-  
-  // Audio State
-  const [trackIndex, setTrackIndex] = useState(0)
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false)
-  const [volume, setVolume] = useState(0.4) // Volume default sedang
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  
-  // Ref untuk mencegah double submission strict mode
-  const isProcessingComplete = useRef(false)
-
-  // --- FETCH HISTORY ---
-  const fetchSessions = useCallback(async () => {
-    const { data } = await supabase.from('focus_sessions').select('*').order('completed_at', { ascending: false }).limit(5)
-    if (data) setSessions(data as FocusSession[])
-    setLoading(false)
-  }, [])
-
-  useEffect(() => { fetchSessions() }, [fetchSessions])
-
-  // --- AUDIO PLAYER LOGIC ---
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = volume
-  }, [volume])
-
-  useEffect(() => {
-    if (audioRef.current) {
-      if (isPlayingAudio) {
-        const playPromise = audioRef.current.play()
-        if (playPromise !== undefined) playPromise.catch(() => setIsPlayingAudio(false)) // Reset jika error
-      } else {
-        audioRef.current.pause()
-      }
-    }
-  }, [isPlayingAudio, trackIndex])
-
-  const toggleAudio = () => setIsPlayingAudio(!isPlayingAudio)
-  const changeTrack = (idx: number) => {
-    setTrackIndex(idx)
-    setIsPlayingAudio(true)
-  }
-
-  // --- TIMER LOGIC (LOOPING SYSTEM) ---
-  const switchMode = (newMode: TimerMode) => {
-    setMode(newMode)
-    if (newMode === 'focus') setTimeLeft(config.focusDuration * 60)
-    else if (newMode === 'shortBreak') setTimeLeft(config.shortBreakDuration * 60)
-    else if (newMode === 'longBreak') setTimeLeft(config.longBreakDuration * 60)
-    setIsActive(false)
-    isProcessingComplete.current = false
-  }
-
-  const saveSettings = () => {
-    setShowSettings(false)
-    // Reset timer saat ini ke durasi baru
-    if (mode === 'focus') setTimeLeft(config.focusDuration * 60)
-    else if (mode === 'shortBreak') setTimeLeft(config.shortBreakDuration * 60)
-    else if (mode === 'longBreak') setTimeLeft(config.longBreakDuration * 60)
-    setIsActive(false)
-  }
-
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null
-    
-    if (isActive && timeLeft > 0) {
-      interval = setInterval(() => setTimeLeft((prev) => prev - 1), 1000)
-    } else if (timeLeft === 0 && isActive) {
-      // Timer habis
-      handleTimerComplete()
-    }
-    
-    return () => { if (interval) clearInterval(interval) }
-  }, [isActive, timeLeft])
-
-  // --- 4. FIX DOUBLE ENTRY & 3. LOOPING LOGIC ---
-  const handleTimerComplete = async () => {
-    if (isProcessingComplete.current) return // Cegah jalan 2x
-    isProcessingComplete.current = true
-    setIsActive(false) // Stop timer sementara
-
-    // A. Play Alarm (Beep)
-    const alarm = new Audio(ALARM_URL)
-    alarm.volume = 0.4
-    alarm.play().catch(e => console.log("Alarm blocked", e))
-
-    // B. Logic Mode Switching
-    if (mode === 'focus') {
-      // 1. Simpan ke Database (Cuma kalau mode fokus)
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        await supabase.from('focus_sessions').insert({
-          user_id: user.id,
-          duration_minutes: config.focusDuration,
-          task_name: taskName || 'Deep Work'
-        })
-        fetchSessions() // Refresh list
-      }
-
-      // 2. Tentukan Break selanjutnya (Short atau Long?)
-      const nextCycles = cycles + 1
-      setCycles(nextCycles)
-
-      if (nextCycles % config.longBreakInterval === 0) {
-        // Waktunya Long Break
-        setMode('longBreak')
-        setTimeLeft(config.longBreakDuration * 60)
-      } else {
-        // Waktunya Short Break
-        setMode('shortBreak')
-        setTimeLeft(config.shortBreakDuration * 60)
-      }
-
-    } else {
-      // Kalau Break selesai, balik ke Focus
-      setMode('focus')
-      setTimeLeft(config.focusDuration * 60)
-    }
-
-    // C. Auto Start?
-    if (config.autoStart) {
-      setTimeout(() => {
-        isProcessingComplete.current = false
-        setIsActive(true)
-      }, 1500) // Jeda dikit sebelum mulai lagi
-    } else {
-      isProcessingComplete.current = false
-    }
-  }
-
+  // Format Waktu
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
 
-  const getTotalDuration = () => {
-    if (mode === 'focus') return config.focusDuration * 60
-    if (mode === 'shortBreak') return config.shortBreakDuration * 60
-    return config.longBreakDuration * 60
-  }
-
+  // Hitung Progress Bar
   const getProgress = () => {
-    const total = getTotalDuration()
+    const total = totalDuration // <--- Hapus tanda kurungnya
     return ((total - timeLeft) / total) * 100
   }
 
   return (
     <div className="max-w-6xl mx-auto py-6 px-4 flex flex-col lg:flex-row gap-8 min-h-[85vh]">
       
-      {/* Audio Element Hidden */}
-      <audio ref={audioRef} src={MUSIC_TRACKS[trackIndex].url} loop crossOrigin="anonymous"/>
-
       {/* --- LEFT: TIMER UTAMA --- */}
       <div className="flex-1 flex flex-col items-center justify-center space-y-8 relative">
         
         {/* Status Indicator */}
         <div className="absolute top-0 left-0 bg-slate-800/50 px-3 py-1 rounded-full text-xs font-bold text-slate-400 border border-white/5 flex items-center gap-2">
-           <Repeat size={12}/> Loop: {cycles} / {config.longBreakInterval} to Long Break
+           <Repeat size={12}/> Loop: {cycles} / {config.longBreakInterval}
         </div>
 
         {/* Mode Tabs */}
         <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-white/10 shadow-inner">
           {[
             { id: 'focus', label: 'Focus', icon: Brain },
-            { id: 'shortBreak', label: 'Short Break', icon: Coffee },
-            { id: 'longBreak', label: 'Long Break', icon: Zap },
+            { id: 'shortBreak', label: 'Short', icon: Coffee },
+            { id: 'longBreak', label: 'Long', icon: Zap },
           ].map((m) => (
             <button
               key={m.id}
-              onClick={() => switchMode(m.id as TimerMode)}
+              onClick={() => switchMode(m.id as any)}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${
                 mode === m.id 
                 ? (mode === 'focus' ? 'bg-blue-600 text-white shadow-blue-900/50' : 'bg-emerald-600 text-white shadow-emerald-900/50') + ' shadow-lg' 
@@ -299,7 +128,7 @@ export default function FocusPage() {
             {isActive ? <Pause size={36} fill="currentColor"/> : <Play size={36} fill="currentColor" className="ml-2"/>}
           </button>
 
-          <button onClick={() => {setIsActive(false); setTimeLeft(getTotalDuration())}} className="p-4 rounded-2xl bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white transition border border-white/5">
+          <button onClick={() => {setIsActive(false); switchMode(mode)}} className="p-4 rounded-2xl bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white transition border border-white/5">
              <RotateCcw size={24} />
           </button>
         </div>
@@ -349,7 +178,7 @@ export default function FocusPage() {
            </div>
            
            <div className="space-y-2 overflow-y-auto flex-1 custom-scrollbar pr-2">
-             {loading ? <Loader2 className="animate-spin mx-auto text-slate-600 mt-4"/> : sessions.map(s => (
+             {sessions.map(s => (
                <div key={s.id} className="flex justify-between items-center p-3 rounded-xl bg-slate-800/30 border border-transparent hover:border-white/10 transition">
                  <div>
                    <p className="text-sm font-medium text-slate-200">{s.task_name}</p>
@@ -367,7 +196,7 @@ export default function FocusPage() {
 
       </div>
 
-      {/* --- SETTINGS MODAL (Expanded) --- */}
+      {/* --- SETTINGS MODAL --- */}
       {showSettings && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-white/10 p-8 rounded-[2rem] w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200">
@@ -412,7 +241,7 @@ export default function FocusPage() {
               </div>
             </div>
 
-            <button onClick={saveSettings} className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500 transition shadow-lg shadow-blue-600/20">
+            <button onClick={() => setShowSettings(false)} className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500 transition shadow-lg shadow-blue-600/20">
                Save Changes
             </button>
           </div>
