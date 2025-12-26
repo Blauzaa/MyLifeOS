@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/set-state-in-effect */
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '../../utils/supabase/client'
@@ -6,7 +5,10 @@ import {
   Plus, Trash2, CheckCircle, Clock, Loader2, 
   Calendar, CheckSquare, X, AlertCircle, AlertTriangle 
 } from 'lucide-react'
+
+// 1. Import Hook Global Modal
 import { useModal } from '../../context/ModalContext'
+
 // --- DND KIT IMPORTS ---
 import {
   DndContext, 
@@ -54,45 +56,9 @@ interface Task {
 
 // --- COMPONENTS ---
 
-// 1. CUSTOM CONFIRMATION MODAL (Pengganti Alert/Confirm Browser)
-const ConfirmationModal = ({ isOpen, title, message, type = 'danger', onConfirm, onCancel }: { 
-    isOpen: boolean, 
-    title: string, 
-    message: string, 
-    type?: 'danger' | 'warning' | 'info',
-    onConfirm: () => void, 
-    onCancel: () => void 
-}) => {
-    if (!isOpen) return null;
-    
-    const colors = {
-        danger: 'bg-red-600 hover:bg-red-500',
-        warning: 'bg-orange-600 hover:bg-orange-500',
-        info: 'bg-blue-600 hover:bg-blue-500'
-    }
+// (ConfirmationModal LAMA SUDAH DIHAPUS DARI SINI)
 
-    return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-slate-900 border border-white/10 w-full max-w-sm rounded-2xl p-6 shadow-2xl scale-100">
-                <div className="flex items-center gap-3 mb-4">
-                    {type === 'danger' && <div className="p-2 bg-red-500/20 rounded-full text-red-500"><Trash2 size={24}/></div>}
-                    {type === 'warning' && <div className="p-2 bg-orange-500/20 rounded-full text-orange-500"><AlertTriangle size={24}/></div>}
-                    {type === 'info' && <div className="p-2 bg-blue-500/20 rounded-full text-blue-500"><AlertCircle size={24}/></div>}
-                    <h3 className="text-xl font-bold text-white">{title}</h3>
-                </div>
-                <p className="text-slate-400 mb-6 text-sm leading-relaxed">{message}</p>
-                <div className="flex gap-3 justify-end">
-                    <button onClick={onCancel} className="px-4 py-2 text-slate-300 hover:bg-white/5 rounded-lg text-sm font-medium transition">Cancel</button>
-                    <button onClick={onConfirm} className={`px-4 py-2 text-white rounded-lg text-sm font-bold shadow-lg transition ${colors[type]}`}>
-                        {type === 'danger' ? 'Yes, Delete' : 'Confirm'}
-                    </button>
-                </div>
-            </div>
-        </div>
-    )
-}
-
-// 2. TASK EDIT MODAL (Detail & Subtasks)
+// 2. TASK EDIT MODAL (Detail & Subtasks - Tetap Disini karena spesifik)
 const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => void, onUpdate: () => void }) => {
   const [subtaskInput, setSubtaskInput] = useState('')
   const [localTask, setLocalTask] = useState<Task>(task)
@@ -287,7 +253,7 @@ const TaskColumn = ({ title, status, icon: Icon, color, tasks, onTaskClick, onDe
                     ))}
                 </SortableContext>
                 {filteredTasks.length === 0 && (
-                   <div className="h-full border-2 border-dashed border-white/5 rounded-xl flex items-center justify-center text-slate-600 text-xs italic">Drop here</div>
+                    <div className="h-full border-2 border-dashed border-white/5 rounded-xl flex items-center justify-center text-slate-600 text-xs italic">Drop here</div>
                 )}
             </div>
         </div>
@@ -301,11 +267,9 @@ export default function TasksPage() {
   const [newTask, setNewTask] = useState('')
   const [loading, setLoading] = useState(true)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  
+  // ✅ 1. Panggil Hook Context
   const { showModal } = useModal()
-  // Custom Modal State
-  const [modalConfig, setModalConfig] = useState<{ 
-      isOpen: boolean, type: 'danger'|'warning'|'info', title: string, message: string, onConfirm: () => void 
-  }>({ isOpen: false, type: 'info', title: '', message: '', onConfirm: () => {} })
 
   // DnD State
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -332,6 +296,7 @@ export default function TasksPage() {
     if (!error) { setNewTask(''); fetchTasks() }
   }
 
+  // ✅ 2. Logic Delete Pakai Global Modal
   const handleDeleteRequest = (id: string) => {
     showModal({
       title: 'Delete Task?',
@@ -339,7 +304,6 @@ export default function TasksPage() {
       type: 'danger',
       confirmText: 'Yes, Delete',
       onConfirm: async () => {
-         // Logic hapus di sini
          await supabase.from('tasks').delete().eq('id', id);
          setTasks(prev => prev.filter(t => t.id !== id));
       }
@@ -393,7 +357,6 @@ export default function TasksPage() {
     if (!over) return;
 
     const overId = over.id as string;
-    // Helper to find container status
     const findContainer = (id: string) => {
         if (['todo', 'doing', 'done'].includes(id)) return id;
         return tasks.find(t => t.id === id)?.status;
@@ -404,39 +367,30 @@ export default function TasksPage() {
 
     if (!item || !targetStatus) return;
 
-    // --- LOGIC: CHECK SUBTASKS WHEN MOVING TO DONE ---
+    // ✅ 3. Logic Validasi Subtask (Global Modal)
     if (targetStatus === 'done' && item.subtasks.length > 0) {
         const hasIncompleteSubtasks = item.subtasks.some(s => !s.is_completed);
         
         if (hasIncompleteSubtasks) {
-            // STOP! Tampilkan Modal Konfirmasi
-            showModal({
-           title: 'Unfinished Subtasks',
-           message: `Task "${item.title}" still has unchecked subtasks. Mark as done?`,
-           type: 'warning',
-           confirmText: 'Force Done',
-           onConfirm: async () => {
-              await updateTaskStatusAndOrder(activeId, 'done');
-           }
-        })
-        return; 
-     }
+           showModal({
+             title: 'Unfinished Subtasks',
+             message: `Task "${item.title}" still has unchecked subtasks. Mark as done?`,
+             type: 'warning',
+             confirmText: 'Force Done',
+             onConfirm: async () => {
+                await updateTaskStatusAndOrder(activeId, 'done');
+             }
+           })
+           return; 
+        }
     }
 
-    // Normal move
     await updateTaskStatusAndOrder(activeId, targetStatus as string);
   };
 
   const updateTaskStatusAndOrder = async (taskId: string, status: string) => {
-      // Optimistic update sudah terjadi di onDragOver, tinggal sync DB
       await supabase.from('tasks').update({ status }).eq('id', taskId);
-      // Re-fetch untuk memastikan urutan benar (opsional bisa dioptimasi)
       fetchTasks(); 
-  }
-
-  const cancelModal = () => {
-      setModalConfig(prev => ({...prev, isOpen: false}));
-      fetchTasks(); // Revert visual drag if user cancelled
   }
 
   // --- RENDER ---
@@ -475,15 +429,8 @@ export default function TasksPage() {
 
       {selectedTask && <TaskModal task={selectedTask} onClose={() => setSelectedTask(null)} onUpdate={fetchTasks} />}
       
-      {/* GLOBAL CONFIRMATION MODAL */}
-      <ConfirmationModal 
-          isOpen={modalConfig.isOpen}
-          title={modalConfig.title}
-          message={modalConfig.message}
-          type={modalConfig.type}
-          onConfirm={modalConfig.onConfirm}
-          onCancel={cancelModal}
-      />
+      {/* ❌ TIDAK ADA LAGI CONFIRMATION MODAL DISINI */}
+      {/* Karena sudah dirender secara global di Layout */}
     </div>
   )
 }
