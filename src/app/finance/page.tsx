@@ -1,22 +1,23 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { createClient } from '../../utils/supabase/client' // Sesuaikan path utils kamu
-import FinanceWidget from '../../components/FinanceWidget' // Sesuaikan path component
+import { createClient } from '../../utils/supabase/client'
+import FinanceWidget from '../../components/FinanceWidget' // <--- Ini memanggil UI Bagus tadi
 import { TransactionItem } from '../../types'
-import { Wallet } from 'lucide-react'
+import { Wallet, RefreshCw } from 'lucide-react'
 
 export default function FinancePage() {
   const supabase = createClient()
   const [transactions, setTransactions] = useState<TransactionItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
-  // 1. Ambil Data dari Supabase
+  // 1. Ambil Data (Fetch)
   const fetchTransactions = useCallback(async () => {
     try {
       const { data, error } = await supabase
-        .from('finances') // Pastikan nama tabel di Supabase 'finances'
+        .from('finances')
         .select('*')
-        .order('created_at', { ascending: false }) // Urutkan dari yang terbaru
+        .order('created_at', { ascending: false })
 
       if (error) throw error
       if (data) setTransactions(data as TransactionItem[])
@@ -24,20 +25,19 @@ export default function FinancePage() {
       console.error('Error fetching finance:', error)
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }, [supabase])
 
-  // Panggil fetch saat halaman dibuka
   useEffect(() => {
     fetchTransactions()
   }, [fetchTransactions])
 
-  // 2. Fungsi Tambah Data
+  // 2. Tambah Data
   const handleAdd = async (newItem: { title: string; amount: number; type: 'income' | 'expense' }) => {
     try {
-      // Ambil user saat ini agar data tersimpan ke akun yang benar
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return alert('Please login first')
+      if (!user) return
 
       const { error } = await supabase
         .from('finances')
@@ -45,20 +45,17 @@ export default function FinancePage() {
           title: newItem.title,
           amount: newItem.amount,
           type: newItem.type,
-          user_id: user.id // Penting: Supabase butuh ini jika RLS aktif
+          user_id: user.id
         }])
 
       if (error) throw error
-
-      // Refresh data setelah berhasil nambah
-      fetchTransactions() 
+      fetchTransactions() // Refresh otomatis
     } catch (error) {
-      console.error('Error adding transaction:', error)
-      alert('Gagal menyimpan data')
+      alert('Gagal menyimpan.')
     }
   }
 
-  // 3. Fungsi Hapus Data
+  // 3. Hapus Data
   const handleDelete = async (id: string) => {
     try {
       const { error } = await supabase
@@ -67,43 +64,58 @@ export default function FinancePage() {
         .eq('id', id)
 
       if (error) throw error
-
-      // Refresh data setelah dihapus
-      fetchTransactions()
+      fetchTransactions() // Refresh otomatis
     } catch (error) {
-      console.error('Error deleting transaction:', error)
-      alert('Gagal menghapus data')
+      alert('Gagal menghapus.')
     }
   }
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto w-full">
-      {/* Header Halaman */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-          <div className="p-3 bg-blue-600 rounded-2xl shadow-lg shadow-blue-900/40">
-            <Wallet size={32} />
+    <div className="flex flex-col h-screen bg-slate-950 text-slate-200">
+      {/* Padding-left (md:pl-64) ditambahkan agar konten tidak tertutup Sidebar 
+         di layar desktop.
+      */}
+      <div className="md:pl-64 flex-1 flex flex-col overflow-hidden">
+        
+        {/* --- Header Area --- */}
+        <header className="px-8 py-6 border-b border-white/5 bg-slate-950/50 backdrop-blur-sm flex justify-between items-center z-10">
+          <div>
+            <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+              Financial Overview
+            </h1>
+            <p className="text-xs text-slate-500 font-mono mt-1 uppercase tracking-wider">
+              Realtime Cashflow Tracker
+            </p>
           </div>
-          Financial Overview
-        </h1>
-        <p className="text-slate-400 mt-2 ml-1">Track your income and expenses efficiently.</p>
-      </div>
+          
+          <button 
+            onClick={() => { setRefreshing(true); fetchTransactions(); }}
+            className={`p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition ${refreshing ? 'animate-spin' : ''}`}
+            title="Refresh Data"
+          >
+            <RefreshCw size={18} />
+          </button>
+        </header>
 
-      {/* Konten Utama */}
-      <div className="h-[calc(100vh-200px)]"> 
-        {loading ? (
-          // Loading State sederhana
-          <div className="flex items-center justify-center h-full text-slate-500 animate-pulse">
-            Loading financial data...
+        {/* --- Main Content Area --- */}
+        <main className="flex-1 overflow-hidden p-4 md:p-8">
+          <div className="max-w-5xl mx-auto h-full">
+            {loading ? (
+               // Skeleton Loading sederhana biar rapi
+               <div className="h-full flex flex-col gap-6 animate-pulse">
+                  <div className="h-40 bg-slate-900 rounded-2xl w-full"></div>
+                  <div className="flex-1 bg-slate-900 rounded-2xl w-full"></div>
+               </div>
+            ) : (
+               // DISINI KITA PANGGIL WIDGET KEREN TADI
+               <FinanceWidget 
+                 transactions={transactions} 
+                 onAdd={handleAdd} 
+                 onDelete={handleDelete} 
+               />
+            )}
           </div>
-        ) : (
-          // Panggil Widget UI di sini
-          <FinanceWidget 
-            transactions={transactions} 
-            onAdd={handleAdd} 
-            onDelete={handleDelete} 
-          />
-        )}
+        </main>
       </div>
     </div>
   )
