@@ -5,8 +5,7 @@ import { createClient } from '../../utils/supabase/client'
 import { 
   Play, Pause, RotateCcw, Trophy, Loader2, History, 
   Settings, Music, Volume2, VolumeX, Coffee, Brain, 
-  ChevronRight, ChevronLeft, Bell,
-  X
+  ChevronRight, ChevronLeft, Zap, CheckCircle2, Repeat
 } from 'lucide-react'
 
 const supabase = createClient()
@@ -21,32 +20,35 @@ interface FocusSession {
 
 type TimerMode = 'focus' | 'shortBreak' | 'longBreak'
 
-// --- 1. DAFTAR LAGU & SUARA (Expanded) ---
-const TRACKS = [
-  { name: "Rainy Mood", url: "https://cdn.pixabay.com/audio/2022/07/04/audio_331b26cb75.mp3", type: 'Ambience 🌧️' },
-  { name: "Lofi Study Beats", url: "https://cdn.pixabay.com/audio/2022/05/27/audio_1808fbf07a.mp3", type: 'Music 🎧' },
-  { name: "Cozy Fireplace", url: "https://cdn.pixabay.com/audio/2021/09/06/audio_097486e923.mp3", type: 'Ambience 🔥' },
-  { name: "Coffee Shop", url: "https://cdn.pixabay.com/audio/2017/08/07/21/51/coffee-shop-2608871_1280.mp3", type: 'Ambience ☕' },
-  { name: "Night Forest", url: "https://cdn.pixabay.com/audio/2021/09/06/audio_3f34825955.mp3", type: 'Ambience 🦉' },
-  { name: "Deep Focus Piano", url: "https://cdn.pixabay.com/audio/2020/09/14/audio_0317e3e9d8.mp3", type: 'Music 🎹' },
-  { name: "Alpha Waves", url: "https://cdn.pixabay.com/audio/2022/01/18/audio_d0a13f69d2.mp3", type: 'Binaural 🧠' },
+// --- 1. DAFTAR LAGU (Updated: Lebih Stabil) ---
+const MUSIC_TRACKS = [
+  { name: "Lofi Hip Hop (Stream)", url: "https://stream.zeno.fm/0r0xa792kwzuv", type: 'Radio 🔴' },
+  { name: "Rain Sounds", url: "https://actions.google.com/sounds/v1/weather/rain_heavy_loud.ogg", type: 'Nature 🌧️' },
+  { name: "Relaxing Piano", url: "https://cdn.pixabay.com/audio/2022/03/24/audio_3cb7ae3a96.mp3", type: 'Music 🎹' },
+  { name: "White Noise", url: "https://actions.google.com/sounds/v1/ambiences/white_noise.ogg", type: 'Focus 🧠' },
+  { name: "Forest Night", url: "https://actions.google.com/sounds/v1/nature/crickets_in_the_night_ambience.ogg", type: 'Nature 🦗' },
+  { name: "Cafe Ambience", url: "https://actions.google.com/sounds/v1/ambiences/coffee_shop.ogg", type: 'Ambience ☕' },
 ]
 
-// --- 2. ALARM SOUND (Chill / Zen Bell) ---
-const ALARM_URL = "https://cdn.pixabay.com/audio/2021/08/04/audio_0625c1539c.mp3" 
+// --- 2. ALARM SOUND (Digital Beep - Soft) ---
+// Suara beep digital klasik tapi pendek
+const ALARM_URL = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"
 
 export default function FocusPage() {
   // --- STATE TIMER ---
   const [mode, setMode] = useState<TimerMode>('focus')
-  const [timeLeft, setTimeLeft] = useState(25 * 60)
+  const [timeLeft, setTimeLeft] = useState(25 * 60) // Default 25 min
   const [isActive, setIsActive] = useState(false)
+  const [cycles, setCycles] = useState(0) // Menghitung berapa kali fokus selesai
   
   // --- STATE SETTINGS ---
   const [showSettings, setShowSettings] = useState(false)
-  const [durations, setDurations] = useState({
-    focus: 25,
-    shortBreak: 5,
-    longBreak: 15
+  const [config, setConfig] = useState({
+    focusDuration: 60,      // Default 1 jam (sesuai request)
+    shortBreakDuration: 5,  // Default 5 menit
+    longBreakDuration: 10,  // Default 10 menit
+    longBreakInterval: 3,   // Long break setelah 3 sesi fokus
+    autoStart: false        // Otomatis lanjut timer
   })
 
   // --- STATE DATA & AUDIO ---
@@ -55,18 +57,17 @@ export default function FocusPage() {
   const [loading, setLoading] = useState(true)
   
   // Audio State
-  const [currentTrackIndex, setCurrentTrackIndex] = useState(0)
+  const [trackIndex, setTrackIndex] = useState(0)
   const [isPlayingAudio, setIsPlayingAudio] = useState(false)
-  const [volume, setVolume] = useState(0.5)
+  const [volume, setVolume] = useState(0.4) // Volume default sedang
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  
+  // Ref untuk mencegah double submission strict mode
+  const isProcessingComplete = useRef(false)
 
   // --- FETCH HISTORY ---
   const fetchSessions = useCallback(async () => {
-    const { data } = await supabase
-      .from('focus_sessions')
-      .select('*')
-      .order('completed_at', { ascending: false })
-      .limit(5)
+    const { data } = await supabase.from('focus_sessions').select('*').order('completed_at', { ascending: false }).limit(5)
     if (data) setSessions(data as FocusSession[])
     setLoading(false)
   }, [])
@@ -75,72 +76,110 @@ export default function FocusPage() {
 
   // --- AUDIO PLAYER LOGIC ---
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = volume
-    }
+    if (audioRef.current) audioRef.current.volume = volume
   }, [volume])
 
   useEffect(() => {
     if (audioRef.current) {
       if (isPlayingAudio) {
         const playPromise = audioRef.current.play()
-        if (playPromise !== undefined) {
-            playPromise.catch(e => console.log("Audio play prevented:", e))
-        }
+        if (playPromise !== undefined) playPromise.catch(() => setIsPlayingAudio(false)) // Reset jika error
       } else {
         audioRef.current.pause()
       }
     }
-  }, [isPlayingAudio, currentTrackIndex])
+  }, [isPlayingAudio, trackIndex])
 
   const toggleAudio = () => setIsPlayingAudio(!isPlayingAudio)
-  
-  const changeTrack = (index: number) => {
-    setCurrentTrackIndex(index)
-    setIsPlayingAudio(true) // Auto play saat ganti lagu
+  const changeTrack = (idx: number) => {
+    setTrackIndex(idx)
+    setIsPlayingAudio(true)
   }
 
-  // --- TIMER LOGIC ---
+  // --- TIMER LOGIC (LOOPING SYSTEM) ---
   const switchMode = (newMode: TimerMode) => {
     setMode(newMode)
-    setTimeLeft(durations[newMode] * 60)
+    if (newMode === 'focus') setTimeLeft(config.focusDuration * 60)
+    else if (newMode === 'shortBreak') setTimeLeft(config.shortBreakDuration * 60)
+    else if (newMode === 'longBreak') setTimeLeft(config.longBreakDuration * 60)
     setIsActive(false)
+    isProcessingComplete.current = false
   }
 
   const saveSettings = () => {
     setShowSettings(false)
-    setTimeLeft(durations[mode] * 60)
+    // Reset timer saat ini ke durasi baru
+    if (mode === 'focus') setTimeLeft(config.focusDuration * 60)
+    else if (mode === 'shortBreak') setTimeLeft(config.shortBreakDuration * 60)
+    else if (mode === 'longBreak') setTimeLeft(config.longBreakDuration * 60)
     setIsActive(false)
   }
 
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null
+    
     if (isActive && timeLeft > 0) {
       interval = setInterval(() => setTimeLeft((prev) => prev - 1), 1000)
-    } else if (timeLeft === 0) {
-      handleComplete()
+    } else if (timeLeft === 0 && isActive) {
+      // Timer habis
+      handleTimerComplete()
     }
+    
     return () => { if (interval) clearInterval(interval) }
   }, [isActive, timeLeft])
 
-  const handleComplete = async () => {
-    setIsActive(false)
-    
-    // 3. MAIN ALARM (SOFT BELL)
-    const alarm = new Audio(ALARM_URL)
-    alarm.volume = 0.6 // Volume alarm pas (tidak terlalu kencang)
-    alarm.play().catch(e => console.log("Alarm play error", e))
+  // --- 4. FIX DOUBLE ENTRY & 3. LOOPING LOGIC ---
+  const handleTimerComplete = async () => {
+    if (isProcessingComplete.current) return // Cegah jalan 2x
+    isProcessingComplete.current = true
+    setIsActive(false) // Stop timer sementara
 
+    // A. Play Alarm (Beep)
+    const alarm = new Audio(ALARM_URL)
+    alarm.volume = 0.4
+    alarm.play().catch(e => console.log("Alarm blocked", e))
+
+    // B. Logic Mode Switching
     if (mode === 'focus') {
+      // 1. Simpan ke Database (Cuma kalau mode fokus)
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         await supabase.from('focus_sessions').insert({
           user_id: user.id,
-          duration_minutes: durations.focus,
-          task_name: taskName || 'Focus Session'
+          duration_minutes: config.focusDuration,
+          task_name: taskName || 'Deep Work'
         })
-        fetchSessions()
+        fetchSessions() // Refresh list
       }
+
+      // 2. Tentukan Break selanjutnya (Short atau Long?)
+      const nextCycles = cycles + 1
+      setCycles(nextCycles)
+
+      if (nextCycles % config.longBreakInterval === 0) {
+        // Waktunya Long Break
+        setMode('longBreak')
+        setTimeLeft(config.longBreakDuration * 60)
+      } else {
+        // Waktunya Short Break
+        setMode('shortBreak')
+        setTimeLeft(config.shortBreakDuration * 60)
+      }
+
+    } else {
+      // Kalau Break selesai, balik ke Focus
+      setMode('focus')
+      setTimeLeft(config.focusDuration * 60)
+    }
+
+    // C. Auto Start?
+    if (config.autoStart) {
+      setTimeout(() => {
+        isProcessingComplete.current = false
+        setIsActive(true)
+      }, 1500) // Jeda dikit sebelum mulai lagi
+    } else {
+      isProcessingComplete.current = false
     }
   }
 
@@ -150,36 +189,45 @@ export default function FocusPage() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
 
+  const getTotalDuration = () => {
+    if (mode === 'focus') return config.focusDuration * 60
+    if (mode === 'shortBreak') return config.shortBreakDuration * 60
+    return config.longBreakDuration * 60
+  }
+
   const getProgress = () => {
-    const totalSeconds = durations[mode] * 60
-    return ((totalSeconds - timeLeft) / totalSeconds) * 100
+    const total = getTotalDuration()
+    return ((total - timeLeft) / total) * 100
   }
 
   return (
-    <div className="max-w-5xl mx-auto py-8 px-4 flex flex-col md:flex-row gap-8 min-h-[80vh]">
+    <div className="max-w-6xl mx-auto py-6 px-4 flex flex-col lg:flex-row gap-8 min-h-[85vh]">
       
-      {/* Hidden Audio Element */}
-      <audio 
-        ref={audioRef} 
-        src={TRACKS[currentTrackIndex].url} 
-        loop 
-      />
+      {/* Audio Element Hidden */}
+      <audio ref={audioRef} src={MUSIC_TRACKS[trackIndex].url} loop crossOrigin="anonymous"/>
 
-      {/* --- LEFT: TIMER SECTION --- */}
-      <div className="flex-1 flex flex-col items-center justify-center space-y-8">
+      {/* --- LEFT: TIMER UTAMA --- */}
+      <div className="flex-1 flex flex-col items-center justify-center space-y-8 relative">
         
-        {/* Mode Selector */}
-        <div className="flex bg-slate-800/50 p-1 rounded-xl border border-white/5">
+        {/* Status Indicator */}
+        <div className="absolute top-0 left-0 bg-slate-800/50 px-3 py-1 rounded-full text-xs font-bold text-slate-400 border border-white/5 flex items-center gap-2">
+           <Repeat size={12}/> Loop: {cycles} / {config.longBreakInterval} to Long Break
+        </div>
+
+        {/* Mode Tabs */}
+        <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-white/10 shadow-inner">
           {[
             { id: 'focus', label: 'Focus', icon: Brain },
-            { id: 'shortBreak', label: 'Short', icon: Coffee },
-            { id: 'longBreak', label: 'Long', icon: Coffee },
+            { id: 'shortBreak', label: 'Short Break', icon: Coffee },
+            { id: 'longBreak', label: 'Long Break', icon: Zap },
           ].map((m) => (
             <button
               key={m.id}
               onClick={() => switchMode(m.id as TimerMode)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                mode === m.id ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-400 hover:text-white'
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                mode === m.id 
+                ? (mode === 'focus' ? 'bg-blue-600 text-white shadow-blue-900/50' : 'bg-emerald-600 text-white shadow-emerald-900/50') + ' shadow-lg' 
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
               }`}
             >
               <m.icon size={16}/> {m.label}
@@ -188,203 +236,188 @@ export default function FocusPage() {
         </div>
 
         {/* Task Input */}
-        {mode === 'focus' && (
-          <div className="w-full max-w-sm relative group">
+        {mode === 'focus' ? (
+          <div className="w-full max-w-md text-center">
              <input 
               type="text" 
-              placeholder="What's your focus?" 
+              placeholder="What are you working on?" 
               value={taskName}
               onChange={(e) => setTaskName(e.target.value)}
-              className="bg-transparent border-b-2 border-white/10 text-center text-2xl font-bold text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500 w-full pb-2 transition-all"
+              className="bg-transparent border-b-2 border-slate-700 text-center text-2xl font-bold text-slate-100 placeholder-slate-700 focus:outline-none focus:border-blue-500 w-full pb-2 transition-all"
              />
-             <div className="absolute right-0 top-2 opacity-0 group-hover:opacity-100 transition text-slate-500">
-                ✏️
-             </div>
+          </div>
+        ) : (
+          <div className="text-center text-emerald-400 font-bold text-xl flex items-center gap-2 animate-bounce">
+            <Coffee size={24}/> Time to recharge!
           </div>
         )}
 
-        {/* Timer UI (Circle) */}
+        {/* Timer Circle */}
         <div className="relative group cursor-pointer" onClick={() => setIsActive(!isActive)}>
            {/* Glow Effect */}
-           <div className={`absolute inset-0 rounded-full blur-3xl opacity-20 transition-all duration-1000 ${isActive ? 'bg-blue-500 animate-pulse' : 'bg-transparent'}`}></div>
+           <div className={`absolute inset-0 rounded-full blur-[50px] opacity-20 transition-all duration-1000 ${
+             isActive 
+               ? (mode === 'focus' ? 'bg-blue-500' : 'bg-emerald-500') 
+               : 'bg-transparent'
+           }`}></div>
            
            <div className="w-72 h-72 md:w-80 md:h-80 relative">
              <svg className="w-full h-full -rotate-90 drop-shadow-2xl" viewBox="0 0 100 100">
-                <circle cx="50" cy="50" r="45" fill="none" stroke="#1e293b" strokeWidth="2" />
+                <circle cx="50" cy="50" r="45" fill="none" stroke="#1e293b" strokeWidth="3" />
                 <circle 
-                  cx="50" cy="50" r="45" fill="none" stroke={mode === 'focus' ? '#3b82f6' : '#10b981'} strokeWidth="3" 
+                  cx="50" cy="50" r="45" fill="none" stroke={mode === 'focus' ? '#3b82f6' : '#10b981'} strokeWidth="4" 
                   strokeDasharray="283" strokeDashoffset={283 - (283 * getProgress() / 100)}
                   strokeLinecap="round"
                   className="transition-all duration-1000 ease-linear"
                 />
              </svg>
              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className={`text-7xl md:text-8xl font-mono font-bold tracking-tighter transition-colors ${isActive ? 'text-white' : 'text-slate-400'}`}>
+                <span className={`text-7xl font-mono font-bold tracking-tighter transition-colors ${isActive ? 'text-white' : 'text-slate-500'}`}>
                   {formatTime(timeLeft)}
                 </span>
-                <span className={`text-sm font-bold uppercase tracking-[0.2em] mt-2 ${isActive ? 'text-blue-400' : 'text-slate-600'}`}>
-                   {isActive ? 'Running' : 'Paused'}
+                <span className={`text-xs font-bold uppercase tracking-[0.3em] mt-4 ${isActive ? (mode === 'focus' ? 'text-blue-400' : 'text-emerald-400') : 'text-slate-700'}`}>
+                   {isActive ? (mode === 'focus' ? 'FOCUSING' : 'RESTING') : 'PAUSED'}
                 </span>
              </div>
           </div>
         </div>
 
-        {/* Control Buttons */}
+        {/* Controls */}
         <div className="flex items-center gap-6">
-          <button onClick={() => setShowSettings(true)} className="p-4 rounded-2xl bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white transition shadow-lg border border-white/5" title="Settings">
-             <Settings size={22} />
+          <button onClick={() => setShowSettings(true)} className="p-4 rounded-2xl bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white transition border border-white/5">
+             <Settings size={24} />
           </button>
           
           <button 
             onClick={() => setIsActive(!isActive)} 
-            className={`w-20 h-20 rounded-3xl flex items-center justify-center transition-all shadow-2xl ${
+            className={`w-24 h-24 rounded-[2rem] flex items-center justify-center transition-all shadow-2xl hover:scale-105 active:scale-95 ${
               isActive 
-                ? 'bg-slate-800 text-white border border-white/10' 
-                : 'bg-white text-slate-900 hover:scale-105 shadow-blue-500/20'
+                ? 'bg-slate-800 text-white border border-white/10 ring-4 ring-slate-900' 
+                : 'bg-white text-slate-900 shadow-blue-500/20'
             }`}
           >
-            {isActive ? <Pause size={32} fill="currentColor"/> : <Play size={32} fill="currentColor" className="ml-1"/>}
+            {isActive ? <Pause size={36} fill="currentColor"/> : <Play size={36} fill="currentColor" className="ml-2"/>}
           </button>
 
-          <button onClick={() => {setIsActive(false); setTimeLeft(durations[mode] * 60)}} className="p-4 rounded-2xl bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white transition shadow-lg border border-white/5" title="Reset">
-             <RotateCcw size={22} />
+          <button onClick={() => {setIsActive(false); setTimeLeft(getTotalDuration())}} className="p-4 rounded-2xl bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white transition border border-white/5">
+             <RotateCcw size={24} />
           </button>
         </div>
       </div>
 
-      {/* --- RIGHT: SIDEBAR --- */}
-      <div className="w-full md:w-80 flex flex-col gap-6">
+      {/* --- RIGHT: SIDEBAR (Music & History) --- */}
+      <div className="w-full lg:w-96 flex flex-col gap-6">
         
-        {/* MUSIC PLAYER CARD */}
+        {/* MUSIC PLAYER */}
         <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 relative overflow-hidden shadow-xl">
-            <div className="absolute -top-6 -right-6 p-4 opacity-[0.03] rotate-12"><Music size={150}/></div>
-            
-            <div className="flex items-center justify-between mb-6">
+             <div className="flex items-center justify-between mb-4">
                <h3 className="font-bold text-slate-400 uppercase text-xs tracking-widest flex items-center gap-2">
-                 <Music size={14} className="text-blue-500"/> Soundscapes
+                 <Music size={16} className={isPlayingAudio ? "text-blue-400 animate-spin-slow" : "text-slate-600"}/> Ambience
                </h3>
-               {isPlayingAudio && (
-                 <div className="flex gap-0.5 items-end h-3">
-                    <div className="w-1 bg-blue-500 animate-[bounce_1s_infinite] h-2"></div>
-                    <div className="w-1 bg-blue-500 animate-[bounce_1.2s_infinite] h-3"></div>
-                    <div className="w-1 bg-blue-500 animate-[bounce_0.8s_infinite] h-1"></div>
-                 </div>
-               )}
-            </div>
-            
-            {/* Track Selector Dropdown */}
-            <div className="relative mb-6 group">
-                <select 
-                  value={currentTrackIndex} 
-                  onChange={(e) => changeTrack(Number(e.target.value))}
-                  className="w-full bg-slate-800 border border-white/10 text-white text-sm rounded-xl p-3 pl-3 pr-10 outline-none appearance-none cursor-pointer hover:border-blue-500/50 transition font-medium truncate"
-                >
-                  {TRACKS.map((track, i) => (
-                    <option key={i} value={i}>
-                       {track.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-                  <ChevronRight size={16} className="rotate-90"/>
-                </div>
+               {isPlayingAudio && <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>}
             </div>
 
-            {/* Now Playing Info */}
-            <div className="flex items-center justify-between mb-6 bg-white/5 p-4 rounded-xl border border-white/5">
-               <div>
-                  <p className="text-xs text-slate-500 uppercase font-bold mb-1">{TRACKS[currentTrackIndex].type}</p>
-                  <p className="text-white font-bold leading-tight">{TRACKS[currentTrackIndex].name}</p>
+            {/* Track Selector */}
+            <div className="bg-slate-950 rounded-xl p-2 mb-4 border border-white/5 flex items-center justify-between">
+               <button onClick={() => changeTrack((trackIndex - 1 + MUSIC_TRACKS.length) % MUSIC_TRACKS.length)} className="p-2 text-slate-400 hover:text-white"><ChevronLeft size={20}/></button>
+               <div className="text-center overflow-hidden px-2">
+                  <p className="text-[10px] text-slate-500 font-bold uppercase">{MUSIC_TRACKS[trackIndex].type}</p>
+                  <p className="text-sm font-bold text-white truncate w-32">{MUSIC_TRACKS[trackIndex].name}</p>
                </div>
-               <button onClick={toggleAudio} className={`w-10 h-10 rounded-full flex items-center justify-center transition shadow-lg ${isPlayingAudio ? 'bg-blue-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
-                 {isPlayingAudio ? <Pause size={18} fill="currentColor"/> : <Play size={18} fill="currentColor" className="ml-0.5"/>}
-               </button>
+               <button onClick={() => changeTrack((trackIndex + 1) % MUSIC_TRACKS.length)} className="p-2 text-slate-400 hover:text-white"><ChevronRight size={20}/></button>
             </div>
 
-            {/* Controls */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <button onClick={() => changeTrack((currentTrackIndex - 1 + TRACKS.length) % TRACKS.length)} className="text-slate-500 hover:text-white"><ChevronLeft size={20}/></button>
-                <div className="flex-1 flex items-center gap-2 bg-slate-800/50 rounded-lg p-2">
-                   {volume === 0 ? <VolumeX size={16} className="text-slate-500"/> : <Volume2 size={16} className="text-blue-400"/>}
-                   <input 
-                     type="range" min="0" max="1" step="0.05" value={volume} 
-                     onChange={(e) => setVolume(parseFloat(e.target.value))}
-                     className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                   />
-                </div>
-                <button onClick={() => changeTrack((currentTrackIndex + 1) % TRACKS.length)} className="text-slate-500 hover:text-white"><ChevronRight size={20}/></button>
-              </div>
+            {/* Play/Vol Controls */}
+            <div className="flex items-center gap-3">
+               <button onClick={toggleAudio} className={`w-12 h-12 flex-shrink-0 rounded-full flex items-center justify-center transition ${isPlayingAudio ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                  {isPlayingAudio ? <Pause size={20} fill="currentColor"/> : <Play size={20} fill="currentColor" className="ml-1"/>}
+               </button>
+               <div className="flex-1 bg-slate-800 rounded-lg px-3 py-2 flex items-center gap-2">
+                  <Volume2 size={16} className="text-slate-400"/>
+                  <input type="range" min="0" max="1" step="0.05" value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"/>
+               </div>
             </div>
         </div>
 
-        {/* STATS CARD */}
-        <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 flex-1 shadow-xl">
-          <div className="flex items-center justify-between mb-4">
+        {/* HISTORY */}
+        <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 flex-1 shadow-lg flex flex-col min-h-[300px]">
+           <div className="flex items-center justify-between mb-4">
              <h3 className="font-bold text-slate-400 uppercase text-xs tracking-widest flex items-center gap-2">
-               <History size={14}/> Recent Focus
+               <History size={14}/> Recent Sessions
              </h3>
-             <span className="bg-emerald-500/10 text-emerald-500 px-2 py-1 rounded text-xs font-bold flex gap-1 items-center">
-               <Trophy size={12}/> {sessions.length}
-             </span>
-          </div>
-          
-          <div className="space-y-2 overflow-y-auto max-h-[250px] pr-1 custom-scrollbar">
-            {loading ? <Loader2 className="animate-spin mx-auto text-slate-600 mt-4"/> : sessions.map(s => (
-              <div key={s.id} className="group flex justify-between items-center p-3 rounded-xl hover:bg-white/5 transition border border-transparent hover:border-white/5 bg-slate-800/30">
-                <div className="overflow-hidden">
-                  <p className="text-sm font-medium text-slate-200 truncate">{s.task_name}</p>
-                  <p className="text-[10px] text-slate-500">{new Date(s.completed_at).toLocaleDateString()}</p>
-                </div>
-                <span className="text-xs font-mono text-slate-500 font-bold bg-slate-900 px-2 py-1 rounded border border-white/5">{s.duration_minutes}m</span>
-              </div>
-            ))}
-            {sessions.length === 0 && <p className="text-center text-slate-600 text-xs italic py-4">No sessions yet.</p>}
-          </div>
+             <span className="text-xs font-bold text-slate-500">{sessions.length} done</span>
+           </div>
+           
+           <div className="space-y-2 overflow-y-auto flex-1 custom-scrollbar pr-2">
+             {loading ? <Loader2 className="animate-spin mx-auto text-slate-600 mt-4"/> : sessions.map(s => (
+               <div key={s.id} className="flex justify-between items-center p-3 rounded-xl bg-slate-800/30 border border-transparent hover:border-white/10 transition">
+                 <div>
+                   <p className="text-sm font-medium text-slate-200">{s.task_name}</p>
+                   <p className="text-[10px] text-slate-500">{new Date(s.completed_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                 </div>
+                 <div className="flex items-center gap-2">
+                   <CheckCircle2 size={14} className="text-blue-500"/>
+                   <span className="text-xs font-mono font-bold text-slate-400">{s.duration_minutes}m</span>
+                 </div>
+               </div>
+             ))}
+             {sessions.length === 0 && <p className="text-center text-slate-600 text-xs italic mt-10">No sessions yet.</p>}
+           </div>
         </div>
 
       </div>
 
-      {/* --- SETTINGS MODAL --- */}
+      {/* --- SETTINGS MODAL (Expanded) --- */}
       {showSettings && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-white/10 p-6 rounded-3xl w-full max-w-sm shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-6">
-               <h2 className="text-xl font-bold text-white flex items-center gap-2"><Settings size={20}/> Timer Settings</h2>
-               <button onClick={() => setShowSettings(false)} className="text-slate-500 hover:text-white"><X size={20}/></button>
-            </div>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/10 p-8 rounded-[2rem] w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200">
+            <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2"><Settings className="text-blue-500"/> Timer Settings</h2>
             
-            <div className="space-y-5 mb-8">
-              <div>
-                <label className="text-xs uppercase font-bold text-slate-500 mb-2 block">Focus Duration</label>
-                <div className="flex items-center gap-2">
-                   <input type="number" value={durations.focus} onChange={(e) => setDurations({...durations, focus: Number(e.target.value)})} className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-blue-500 font-mono font-bold text-lg text-center"/>
-                   <span className="text-slate-500 text-sm">min</span>
-                </div>
+            <div className="space-y-6 mb-8">
+              {/* Duration Settings */}
+              <div className="grid grid-cols-3 gap-3">
+                 <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold text-slate-500">Focus (m)</label>
+                    <input type="number" value={config.focusDuration} onChange={(e) => setConfig({...config, focusDuration: Number(e.target.value)})} className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-center text-white font-bold outline-none focus:border-blue-500"/>
+                 </div>
+                 <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold text-slate-500">Short (m)</label>
+                    <input type="number" value={config.shortBreakDuration} onChange={(e) => setConfig({...config, shortBreakDuration: Number(e.target.value)})} className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-center text-white font-bold outline-none focus:border-emerald-500"/>
+                 </div>
+                 <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold text-slate-500">Long (m)</label>
+                    <input type="number" value={config.longBreakDuration} onChange={(e) => setConfig({...config, longBreakDuration: Number(e.target.value)})} className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-center text-white font-bold outline-none focus:border-emerald-500"/>
+                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs uppercase font-bold text-slate-500 mb-2 block">Short Break</label>
-                  <div className="flex items-center gap-2">
-                     <input type="number" value={durations.shortBreak} onChange={(e) => setDurations({...durations, shortBreak: Number(e.target.value)})} className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-green-500 font-mono font-bold text-lg text-center"/>
+
+              {/* Loop Settings */}
+              <div className="bg-slate-800/50 p-4 rounded-xl space-y-4 border border-white/5">
+                  <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium text-slate-300">Sessions before Long Break</span>
+                      <input type="number" min="1" max="10" value={config.longBreakInterval} onChange={(e) => setConfig({...config, longBreakInterval: Number(e.target.value)})} className="w-16 bg-slate-900 border border-white/10 rounded-lg p-2 text-center text-white font-bold"/>
                   </div>
-                </div>
-                <div>
-                  <label className="text-xs uppercase font-bold text-slate-500 mb-2 block">Long Break</label>
-                  <div className="flex items-center gap-2">
-                     <input type="number" value={durations.longBreak} onChange={(e) => setDurations({...durations, longBreak: Number(e.target.value)})} className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-green-500 font-mono font-bold text-lg text-center"/>
+                  
+                  <div className="flex justify-between items-center border-t border-white/5 pt-4">
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium text-slate-300">Auto-start Timer</span>
+                        <span className="text-[10px] text-slate-500">Continue to next timer automatically</span>
+                      </div>
+                      <button 
+                        onClick={() => setConfig({...config, autoStart: !config.autoStart})}
+                        className={`w-12 h-6 rounded-full transition relative ${config.autoStart ? 'bg-blue-600' : 'bg-slate-700'}`}
+                      >
+                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${config.autoStart ? 'left-7' : 'left-1'}`}></div>
+                      </button>
                   </div>
-                </div>
               </div>
             </div>
 
-            <button onClick={saveSettings} className="w-full py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500 transition shadow-lg shadow-blue-900/20">
+            <button onClick={saveSettings} className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500 transition shadow-lg shadow-blue-600/20">
                Save Changes
             </button>
           </div>
         </div>
       )}
-
     </div>
   )
 }
