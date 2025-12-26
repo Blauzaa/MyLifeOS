@@ -24,3 +24,12 @@ export interface SnippetItem {
   code: string
   language: string
 }
+
+export interface TransactionItem {
+  id: string
+  title: string
+  amount: number
+  type: 'income' | 'expense'
+  category?: string
+  created_at?: string
+}
