@@ -270,7 +270,7 @@ export default function NotesPage() {
           await deleteImagesFromCloudinary(noteToDelete.content)
         }
         await supabase.from('notes').delete().eq('id', id)
-        if (selectedNote?.id === id) createNewNote()
+        if (selectedNote?.id === id) setSelectedNote(null)
         setNotes(prev => prev.filter(n => n.id !== id))
       }
     })

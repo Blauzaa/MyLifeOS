@@ -97,8 +97,8 @@ export default function AIChat() {
                   {/* Text Content */}
                   {m.content && (
                     <div className={`max-w-[85%] p-3.5 rounded-2xl text-sm shadow-sm leading-relaxed ${m.role === 'user'
-                        ? 'bg-blue-600 text-white rounded-tr-sm'
-                        : 'bg-slate-800 text-slate-200 rounded-tl-sm border border-white/5'
+                      ? 'bg-blue-600 text-white rounded-tr-sm'
+                      : 'bg-slate-800 text-slate-200 rounded-tl-sm border border-white/5'
                       }`}>
                       {m.content}
                     </div>
@@ -129,6 +129,7 @@ export default function AIChat() {
                       addFinance: { icon: CheckCircle2, color: 'text-emerald-400', label: 'Transaction Recorded' },
                       addNote: { icon: CheckCircle2, color: 'text-yellow-400', label: 'Note Saved' },
                       addEvent: { icon: CheckCircle2, color: 'text-orange-400', label: 'Event Scheduled' },
+                      addWatchlist: { icon: CheckCircle2, color: 'text-pink-400', label: 'Added to Watchlist' },
                       triggerAction: { icon: Sparkles, color: 'text-purple-400', label: 'Action Triggered' }
                     }
 
@@ -147,7 +148,7 @@ export default function AIChat() {
                         <div className={`p-1.5 rounded-full bg-white/5`}>
                           {!addResult ? <Loader2 className="animate-spin" size={14} /> : <config.icon size={14} className={config.color} />}
                         </div>
-                        <div className="flex-1">
+                        <div className="flex-1 min-w-0">
                           <span className={`font-bold block ${config.color}`}>{addResult ? config.label : 'Processing...'}</span>
                           <span className="opacity-70 truncate block">
                             {addResult ? (toolInvocation.result as string) : `Executing ${name}...`}
@@ -174,16 +175,24 @@ export default function AIChat() {
 
             {/* Input Form */}
             <form onSubmit={handleSubmit} className="p-3 bg-slate-900 border-t border-white/10 flex gap-2 items-end">
-              <input
-                className="flex-1 bg-slate-950/50 text-white px-4 py-3 rounded-xl text-sm outline-none border border-white/10 focus:border-blue-500 transition focus:ring-1 focus:ring-blue-500 placeholder:text-slate-600"
+              <textarea
+                className="flex-1 bg-slate-950/50 text-white px-4 py-3 rounded-xl text-sm outline-none border border-white/10 focus:border-blue-500 transition focus:ring-1 focus:ring-blue-500 placeholder:text-slate-600 resize-none custom-scrollbar"
                 value={input}
                 onChange={handleInputChange}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit(e as any);
+                  }
+                }}
                 placeholder="Type a message..."
+                rows={1}
+                style={{ minHeight: '44px', maxHeight: '120px' }}
               />
               <button
                 type="submit"
                 disabled={isLoading || !input.trim()}
-                className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-900/20 aspect-square flex items-center justify-center"
+                className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-900/20 aspect-square flex items-center justify-center shrink-0 h-[44px]"
               >
                 {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
               </button>
