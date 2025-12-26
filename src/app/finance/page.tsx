@@ -64,47 +64,44 @@ export default function FinancePage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-950 text-slate-200 font-sans">
-      
-      <main className="flex-1 w-full md:ml-64 transition-all duration-300 ease-in-out">
-        
-        {/* Header Section */}
-        <header className="sticky top-0 z-20 bg-slate-950/80 backdrop-blur-md border-b border-white/5 px-6 py-4 flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-              Financial Overview
-            </h1>
-            <p className="text-xs text-slate-500 mt-1">Realtime Cashflow Management</p>
-          </div>
-          
-          <button 
-            onClick={() => { setRefreshing(true); fetchTransactions(); }}
-            className={`p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition ${refreshing ? 'animate-spin' : ''}`}
-            title="Refresh Data"
-          >
-            <RefreshCw size={18} />
-          </button>
-        </header>
+    <div className="h-[calc(100vh-100px)] flex flex-col pb-6 space-y-6">
 
-        {/* Content Section - FIXED: Menggunakan max-w-6xl agar lebih simetris di tengah */}
-        <div className="p-4 md:p-8 w-full max-w-6xl mx-auto space-y-8">
-            {loading ? (
-               <div className="flex flex-col gap-6 animate-pulse">
-                  <div className="h-40 bg-slate-900 rounded-3xl w-full"></div>
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                      <div className="h-[500px] bg-slate-900 rounded-3xl lg:col-span-2"></div>
-                      <div className="h-[400px] bg-slate-900 rounded-3xl"></div>
-                  </div>
-               </div>
-            ) : (
-               <FinanceWidget 
-                 transactions={transactions} 
-                 onAdd={handleAdd} 
-                 onDelete={handleDelete} 
-               />
-            )}
+      {/* Header Section */}
+      <header className="flex items-center justify-between mb-2">
+        <div>
+          <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+            Financial Overview
+          </h1>
+          <p className="text-sm text-slate-400 mt-1">Realtime Cashflow Management</p>
         </div>
-      </main>
+
+        <button
+          onClick={() => { setRefreshing(true); fetchTransactions(); }}
+          className={`p-2.5 rounded-xl bg-slate-900 border border-white/10 text-slate-400 hover:text-white hover:bg-slate-800 transition shadow-lg ${refreshing ? 'animate-spin' : ''}`}
+          title="Refresh Data"
+        >
+          <RefreshCw size={20} />
+        </button>
+      </header>
+
+      {/* Content Section */}
+      <div className="w-full mx-auto space-y-8 flex-1 overflow-y-auto custom-scrollbar pr-2">
+        {loading ? (
+          <div className="flex flex-col gap-6 animate-pulse">
+            <div className="h-40 bg-slate-900 rounded-3xl w-full"></div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="h-[500px] bg-slate-900 rounded-3xl lg:col-span-2"></div>
+              <div className="h-[400px] bg-slate-900 rounded-3xl"></div>
+            </div>
+          </div>
+        ) : (
+          <FinanceWidget
+            transactions={transactions}
+            onAdd={handleAdd}
+            onDelete={handleDelete}
+          />
+        )}
+      </div>
     </div>
   )
 }

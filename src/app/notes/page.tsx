@@ -1,8 +1,8 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '../../utils/supabase/client'
-import { 
-  Plus, Trash2, Image as ImageIcon, Loader2, Cloud, 
+import {
+  Plus, Trash2, Image as ImageIcon, Loader2, Cloud,
   Search, FileText, MoreVertical, Layout, X
 } from 'lucide-react'
 import imageCompression from 'browser-image-compression'
@@ -29,16 +29,16 @@ export default function NotesPage() {
   const [notes, setNotes] = useState<Note[]>([])
   const [selectedNote, setSelectedNote] = useState<Note | null>(null)
   const { showModal } = useModal() // Panggil Modal Global
-  
+
   const [loading, setLoading] = useState(true)
   const [isUploading, setIsUploading] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
-  
+
   const [editTitle, setEditTitle] = useState('')
   const [searchTerm, setSearchTerm] = useState('') // New: Search
-  const [coverUrlInput, setCoverUrlInput] = useState('') 
+  const [coverUrlInput, setCoverUrlInput] = useState('')
   const [showCoverInput, setShowCoverInput] = useState(false)
-  
+
   const [lastChange, setLastChange] = useState<number>(Date.now())
 
   // --- SETUP EDITOR TIPTAP ---
@@ -59,8 +59,8 @@ export default function NotesPage() {
       },
     },
     onUpdate: () => {
-      setSaveStatus('unsaved') 
-      setLastChange(Date.now()) 
+      setSaveStatus('unsaved')
+      setLastChange(Date.now())
     },
   })
 
@@ -91,22 +91,22 @@ export default function NotesPage() {
       setIsUploading(true)
       const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1200, useWebWorker: true }
       const compressedFile = await imageCompression(file, options)
-      
+
       const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
       const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET
-      
+
       if (!cloudName || !uploadPreset) throw new Error("Config Cloudinary missing")
 
       const formData = new FormData()
       formData.append('file', compressedFile)
-      formData.append('upload_preset', uploadPreset) 
-      
+      formData.append('upload_preset', uploadPreset)
+
       const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
         method: 'POST', body: formData
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error?.message)
-      return result.secure_url 
+      return result.secure_url
     } catch (err) {
       console.error(err)
       // Gunakan Modal untuk error
@@ -153,11 +153,11 @@ export default function NotesPage() {
     try {
       if (selectedNote) {
         // Update existing
-        await supabase.from('notes').update({ 
-          title: editTitle, 
-          content: contentHtml, 
+        await supabase.from('notes').update({
+          title: editTitle,
+          content: contentHtml,
           cover_url: coverUrlInput,
-          updated_at: new Date() 
+          updated_at: new Date()
         }).eq('id', selectedNote.id)
 
         setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, title: editTitle, content: contentHtml, cover_url: coverUrlInput } : n))
@@ -176,18 +176,19 @@ export default function NotesPage() {
         }
       }
       setSaveStatus('saved')
-    } catch (error) {
+    } catch (error: any) {
       console.error(error)
       setSaveStatus('unsaved')
+      alert(`Gagal menyimpan catatan: ${error.message || 'Unknown error'}`) // Helper feedback
     }
   }
 
   // 5. AUTO SAVE TRIGGER
   useEffect(() => {
-    if (!selectedNote && !editTitle && editor?.isEmpty) return 
-    const timer = setTimeout(() => { saveToDb() }, 1500) 
+    if (!selectedNote && !editTitle && editor?.isEmpty) return
+    const timer = setTimeout(() => { saveToDb() }, 1500)
     return () => clearTimeout(timer)
-  }, [lastChange, editTitle, coverUrlInput, saveToDb]) 
+  }, [lastChange, editTitle, coverUrlInput, saveToDb])
 
 
   // 6. EVENT HANDLERS
@@ -242,19 +243,19 @@ export default function NotesPage() {
   // REQ #8: CUSTOM MODAL DELETE
   const handleDelete = (id: string) => {
     showModal({
-        title: 'Delete Note?',
-        message: 'This note and all images inside it will be permanently deleted.',
-        type: 'danger',
-        confirmText: 'Delete Forever',
-        onConfirm: async () => {
-            const noteToDelete = notes.find(n => n.id === id)
-            if (noteToDelete?.content) {
-              await deleteImagesFromCloudinary(noteToDelete.content)
-            }
-            await supabase.from('notes').delete().eq('id', id)
-            if (selectedNote?.id === id) createNewNote()
-            setNotes(prev => prev.filter(n => n.id !== id))
+      title: 'Delete Note?',
+      message: 'This note and all images inside it will be permanently deleted.',
+      type: 'danger',
+      confirmText: 'Delete Forever',
+      onConfirm: async () => {
+        const noteToDelete = notes.find(n => n.id === id)
+        if (noteToDelete?.content) {
+          await deleteImagesFromCloudinary(noteToDelete.content)
         }
+        await supabase.from('notes').delete().eq('id', id)
+        if (selectedNote?.id === id) createNewNote()
+        setNotes(prev => prev.filter(n => n.id !== id))
+      }
     })
   }
 
@@ -262,49 +263,49 @@ export default function NotesPage() {
 
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-100px)] gap-6 animate-in fade-in duration-500">
-      
+
       {/* --- SIDEBAR --- */}
       <div className="w-full md:w-80 flex flex-col gap-4 flex-shrink-0">
-        
+
         {/* Header Sidebar */}
         <div className="flex gap-2">
-            <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16}/>
-                <input 
-                    placeholder="Search notes..." 
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    className="w-full bg-slate-900 border border-white/10 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white focus:border-blue-500 outline-none transition"
-                />
-            </div>
-            <button onClick={createNewNote} className="bg-blue-600 hover:bg-blue-500 text-white p-2.5 rounded-xl transition shadow-lg hover:shadow-blue-500/20 active:scale-95">
-                <Plus size={20}/>
-            </button>
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+            <input
+              placeholder="Search notes..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full bg-slate-900 border border-white/10 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white focus:border-blue-500 outline-none transition"
+            />
+          </div>
+          <button onClick={createNewNote} className="bg-blue-600 hover:bg-blue-500 text-white p-2.5 rounded-xl transition shadow-lg hover:shadow-blue-500/20 active:scale-95">
+            <Plus size={20} />
+          </button>
         </div>
 
         {/* List Notes */}
         <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
           {loading ? (
-             <div className="flex flex-col items-center justify-center pt-20 opacity-50 space-y-2">
-                 <Loader2 className="animate-spin" />
-                 <span className="text-xs">Loading notes...</span>
-             </div>
+            <div className="flex flex-col items-center justify-center pt-20 opacity-50 space-y-2">
+              <Loader2 className="animate-spin" />
+              <span className="text-xs">Loading notes...</span>
+            </div>
           ) : filteredNotes.length === 0 ? (
-             <div className="text-center text-slate-500 pt-10 text-sm">No notes found.</div>
+            <div className="text-center text-slate-500 pt-10 text-sm">No notes found.</div>
           ) : (
             filteredNotes.map((note, idx) => (
-              <div key={note.id} onClick={() => selectNote(note)} 
+              <div key={note.id} onClick={() => selectNote(note)}
                 className={`p-4 rounded-xl border cursor-pointer transition-all duration-200 animate-in slide-in-from-left-4
-                    ${selectedNote?.id === note.id 
-                        ? 'bg-gradient-to-br from-blue-600 to-blue-700 border-blue-500 text-white shadow-xl translate-x-1' 
-                        : 'bg-slate-900/40 border-white/5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 hover:border-white/10'
-                    }`}
+                    ${selectedNote?.id === note.id
+                    ? 'bg-gradient-to-br from-blue-600 to-blue-700 border-blue-500 text-white shadow-xl translate-x-1'
+                    : 'bg-slate-900/40 border-white/5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 hover:border-white/10'
+                  }`}
                 style={{ animationDelay: `${idx * 50}ms` }}
               >
                 <h3 className={`font-bold truncate text-sm mb-1 ${!note.title && 'italic opacity-50'}`}>{note.title || 'Untitled'}</h3>
                 <div className="flex justify-between items-center text-[10px] opacity-70">
-                    <span className="flex items-center gap-1"><FileText size={10}/> {new Date(note.created_at).toLocaleDateString()}</span>
-                    {note.cover_url && <ImageIcon size={10}/>}
+                  <span className="flex items-center gap-1"><FileText size={10} /> {new Date(note.created_at).toLocaleDateString()}</span>
+                  {note.cover_url && <ImageIcon size={10} />}
                 </div>
               </div>
             ))
@@ -314,91 +315,91 @@ export default function NotesPage() {
 
       {/* --- MAIN EDITOR --- */}
       <div className="flex-1 bg-slate-900/50 backdrop-blur-md border border-white/10 rounded-3xl flex flex-col overflow-hidden shadow-2xl relative animate-in zoom-in-95 duration-300">
-        
+
         {/* Cover Image Area */}
         {coverUrlInput && (
-            <div className="relative h-48 w-full group overflow-hidden bg-slate-800">
-                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={coverUrlInput} alt="Cover" className="w-full h-full object-cover opacity-80 group-hover:scale-105 transition-transform duration-700"/>
-                <button onClick={() => setCoverUrlInput('')} className="absolute top-2 right-2 bg-black/50 p-1.5 rounded-full text-white opacity-0 group-hover:opacity-100 transition hover:bg-red-500">
-                    <Trash2 size={14}/>
-                </button>
-            </div>
+          <div className="relative h-48 w-full group overflow-hidden bg-slate-800">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={coverUrlInput} alt="Cover" className="w-full h-full object-cover opacity-80 group-hover:scale-105 transition-transform duration-700" />
+            <button onClick={() => setCoverUrlInput('')} className="absolute top-2 right-2 bg-black/50 p-1.5 rounded-full text-white opacity-0 group-hover:opacity-100 transition hover:bg-red-500">
+              <Trash2 size={14} />
+            </button>
+          </div>
         )}
 
         {/* Toolbar */}
         <div className="px-6 py-4 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
           <div className="flex gap-3 items-center">
-            
+
             {/* Status Indicator */}
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold tracking-wide transition-all
-                ${saveStatus === 'saving' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 
-                  saveStatus === 'unsaved' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
+                ${saveStatus === 'saving' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                saveStatus === 'unsaved' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
                   'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
-              {saveStatus === 'saving' ? <Loader2 size={12} className="animate-spin"/> : <Cloud size={12}/>}
+              {saveStatus === 'saving' ? <Loader2 size={12} className="animate-spin" /> : <Cloud size={12} />}
               {saveStatus === 'saving' ? 'SAVING...' : saveStatus === 'unsaved' ? 'UNSAVED' : 'SAVED'}
             </div>
 
             <div className="h-6 w-px bg-white/10 mx-1"></div>
 
             {/* Actions */}
-            <button onClick={() => setShowCoverInput(!showCoverInput)} 
-                className={`p-2 rounded-lg transition ${showCoverInput ? 'bg-blue-500/20 text-blue-400' : 'hover:bg-white/10 text-slate-400'}`} title="Add Cover URL">
-                <Layout size={18}/>
+            <button onClick={() => setShowCoverInput(!showCoverInput)}
+              className={`p-2 rounded-lg transition ${showCoverInput ? 'bg-blue-500/20 text-blue-400' : 'hover:bg-white/10 text-slate-400'}`} title="Add Cover URL">
+              <Layout size={18} />
             </button>
-            
+
             <label className="cursor-pointer p-2 hover:bg-white/10 rounded-lg text-slate-400 transition" title="Insert Image in Text">
-              {isUploading ? <Loader2 className="animate-spin" size={18}/> : <ImageIcon size={18}/>}
-              <input type="file" hidden accept="image/*" onChange={handleManualUpload} disabled={isUploading}/>
+              {isUploading ? <Loader2 className="animate-spin" size={18} /> : <ImageIcon size={18} />}
+              <input type="file" hidden accept="image/*" onChange={handleManualUpload} disabled={isUploading} />
             </label>
           </div>
 
           {selectedNote && (
             <button onClick={() => handleDelete(selectedNote.id)} className="p-2 hover:bg-red-500/10 text-slate-500 hover:text-red-500 rounded-lg transition" title="Delete Note">
-              <Trash2 size={18}/>
+              <Trash2 size={18} />
             </button>
           )}
         </div>
 
         {/* Input Cover URL (Collapsible) */}
         {showCoverInput && (
-            <div className="px-6 py-3 bg-slate-900 border-b border-white/5 animate-in slide-in-from-top-2 flex gap-2">
-                <input 
-                    placeholder="Paste image URL for header cover (https://...)" 
-                    className="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-1.5 text-sm outline-none text-white focus:border-blue-500"
-                    value={coverUrlInput}
-                    onChange={(e) => {
-                        setCoverUrlInput(e.target.value)
-                        setSaveStatus('unsaved') // Trigger auto save
-                        setLastChange(Date.now())
-                    }}
-                />
-                <button onClick={() => setShowCoverInput(false)} className="p-1.5 hover:bg-white/10 rounded"><X size={16}/></button>
-            </div>
+          <div className="px-6 py-3 bg-slate-900 border-b border-white/5 animate-in slide-in-from-top-2 flex gap-2">
+            <input
+              placeholder="Paste image URL for header cover (https://...)"
+              className="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-1.5 text-sm outline-none text-white focus:border-blue-500"
+              value={coverUrlInput}
+              onChange={(e) => {
+                setCoverUrlInput(e.target.value)
+                setSaveStatus('unsaved') // Trigger auto save
+                setLastChange(Date.now())
+              }}
+            />
+            <button onClick={() => setShowCoverInput(false)} className="p-1.5 hover:bg-white/10 rounded"><X size={16} /></button>
+          </div>
         )}
 
         {/* Editor Area */}
         <div className="flex-1 overflow-y-auto custom-scrollbar cursor-text bg-slate-900/30" onClick={() => editor?.chain().focus().run()}>
-           <div className="max-w-3xl mx-auto px-8 py-10 min-h-full">
-                <input 
-                    id="note-title"
-                    className="w-full bg-transparent text-4xl font-bold outline-none text-slate-100 placeholder:text-slate-600 mb-6 border-none p-0 focus:ring-0"
-                    placeholder="Untitled Note"
-                    value={editTitle}
-                    onChange={e => setEditTitle(e.target.value)}
-                />
-                <EditorContent editor={editor} className="min-h-[300px]" />
-           </div>
+          <div className="max-w-3xl mx-auto px-8 py-10 min-h-full">
+            <input
+              id="note-title"
+              className="w-full bg-transparent text-4xl font-bold outline-none text-slate-100 placeholder:text-slate-600 mb-6 border-none p-0 focus:ring-0"
+              placeholder="Untitled Note"
+              value={editTitle}
+              onChange={e => setEditTitle(e.target.value)}
+            />
+            <EditorContent editor={editor} className="min-h-[300px]" />
+          </div>
         </div>
 
         {!selectedNote && !editTitle && editor?.isEmpty && (
-             <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-600 pointer-events-none bg-slate-900/50 backdrop-blur-sm z-10">
-                 <div className="bg-slate-900 p-6 rounded-2xl border border-white/5 shadow-2xl flex flex-col items-center">
-                    <FileText size={48} className="mb-4 opacity-50"/>
-                    <p className="text-lg font-medium text-slate-400">Select a note or create a new one</p>
-                    <p className="text-sm opacity-50 mt-1">Your ideas are safe here.</p>
-                 </div>
-             </div>
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-600 pointer-events-none bg-slate-900/50 backdrop-blur-sm z-10">
+            <div className="bg-slate-900 p-6 rounded-2xl border border-white/5 shadow-2xl flex flex-col items-center">
+              <FileText size={48} className="mb-4 opacity-50" />
+              <p className="text-lg font-medium text-slate-400">Select a note or create a new one</p>
+              <p className="text-sm opacity-50 mt-1">Your ideas are safe here.</p>
+            </div>
+          </div>
         )}
       </div>
     </div>
