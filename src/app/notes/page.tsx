@@ -222,14 +222,26 @@ export default function NotesPage() {
     }
   }
 
-  const createNewNote = () => {
-    setSelectedNote(null)
-    setEditTitle('')
-    setCoverUrlInput('')
-    editor?.commands.clearContent()
-    setSaveStatus('saved')
-    // Focus title logic via timeout
-    setTimeout(() => document.getElementById('note-title')?.focus(), 100)
+  const createNewNote = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    setLoading(true)
+    const { data, error } = await supabase.from('notes').insert({
+      title: '', // Draft title
+      content: '',
+      user_id: user.id
+    }).select().single()
+
+    if (data) {
+      setNotes(prev => [data, ...prev])
+      selectNote(data)
+      // Focus title immediately
+      setTimeout(() => document.getElementById('note-title')?.focus(), 100)
+    } else {
+      alert("Failed to create draft note.")
+    }
+    setLoading(false)
   }
 
   const selectNote = (note: Note) => {

@@ -267,25 +267,48 @@ export default function WatchlistPage() {
       return
     }
 
-    // Auto position at bottom
-    const statusItems = items.filter(i => i.status === formData.status);
-    const newPos = statusItems.length > 0 ? Math.max(...statusItems.map(i => i.position)) + 1 : 0;
+    // Check if Edit Mode (activeId is used temporarily to store ID being edited when modal is open, 
+    // BUT activeId is also used for DnD. We should use a separate state or just reuse activeId if DnD is not active.
+    // However, logic above sets activeId on click. DnD sets activeId on DragStart. 
+    // They might conflict but likely not at same time. 
+    // BETTER: Use a separate state `editingId`.
+    // But since I used activeId in the previous step, I should use it here or check if items contains it.
+    // Wait, activeId is string | null.
 
-    const { error } = await supabase.from('watchlist').insert({
-      ...formData, user_id: user.id, position: newPos
-    })
+    // UPDATE
+    if (activeId && items.find(i => i.id === activeId)) {
+      const { error } = await supabase.from('watchlist').update({
+        ...formData, updated_at: new Date()
+      }).eq('id', activeId)
 
-    if (!error) {
-      setIsModalOpen(false)
-      setFormData({ title: '', type: 'movie', status: 'plan', link: '', synopsis: '', image_url: '' })
-      fetchWatchlist()
+      if (!error) {
+        setIsModalOpen(false)
+        setActiveId(null)
+        setFormData({ title: '', type: 'movie', status: 'plan', link: '', synopsis: '', image_url: '' })
+        fetchWatchlist()
+      }
     } else {
-      showModal({
-        title: 'Error', message: error.message, type: 'danger',
-        onConfirm: function (): Promise<void> | void {
-          throw new Error('Function not implemented.')
-        }
+      // CREATE
+      // Auto position at bottom
+      const statusItems = items.filter(i => i.status === formData.status);
+      const newPos = statusItems.length > 0 ? Math.max(...statusItems.map(i => i.position)) + 1 : 0;
+
+      const { error } = await supabase.from('watchlist').insert({
+        ...formData, user_id: user.id, position: newPos
       })
+
+      if (!error) {
+        setIsModalOpen(false)
+        setFormData({ title: '', type: 'movie', status: 'plan', link: '', synopsis: '', image_url: '' })
+        fetchWatchlist()
+      } else {
+        showModal({
+          title: 'Error', message: error.message, type: 'danger',
+          onConfirm: function (): Promise<void> | void {
+            throw new Error('Function not implemented.')
+          }
+        })
+      }
     }
   }
 

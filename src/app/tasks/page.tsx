@@ -309,7 +309,53 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
                 <label className="text-xs text-slate-500 font-bold uppercase">Status</label>
                 <select
                   value={localTask.status}
-                  onChange={(e) => updateTaskField({ status: e.target.value as any })}
+                  onChange={(e) => {
+                    const newStatus = e.target.value as any;
+                    if (newStatus === 'done' && localTask.subtasks.length > 0) {
+                      const hasIncomplete = localTask.subtasks.some(s => !s.is_completed);
+                      if (hasIncomplete) {
+                        // Prevent change & show warning via Alert for simplicity inside Modal (or use custom modal if possible, but standard alert is safer for now to avoid z-index hell)
+                        // Better: Use the same showModal from context if available in parent?
+                        // Since TaskModal is a child component, we might not have access to the exact same 'showModal' context instance if not passed or if context is global. 
+                        // Actually TaskModal uses `useModal`? No, `TasksPage` uses it. 
+                        // Let's pass a `checkSubtasks` prop or handle it inside `updateTaskField`.
+                        // For now, let's just use window.confirm or alert to block it, OR simply revert if not confirmed.
+                        const confirmComplete = window.confirm(`"${localTask.title}" has incomplete subtasks. Mark all as done and complete task?`);
+                        if (confirmComplete) {
+                          // Logic to mark all subtasks done
+                          // We need to call a function that updates subtasks AND status.
+                          // Since we are inside the modal, we can call a prop function or handle it here.
+                          // Let's defer to a prop `onForceComplete` if possible? 
+                          // But `TaskModal` only has `onUpdate`.
+                          // Let's try to do it here.
+                          // Call an async function to update all subtasks.
+                          updateTaskField({ status: 'done' }); // This just updates status. 
+                          // We need to update subtasks too. Since updateTaskField is simple, we might need a separate function.
+                          // Let's stick to the prompt requirement: "manual ubah status dia tanya".
+                          // Let's assume the user accepted.
+                          const updateSubtasks = async () => {
+                            await supabase.from('subtasks').update({ is_completed: true }).eq('task_id', localTask.id);
+                            // Refetch? cancel?
+                            // We update local state too.
+                            setLocalTask(prev => ({
+                              ...prev,
+                              status: 'done',
+                              subtasks: prev.subtasks.map(s => ({ ...s, is_completed: true }))
+                            }));
+                            updateTaskField({ status: 'done' });
+                          };
+                          updateSubtasks();
+                        } else {
+                          // Cancel: do nothing, revert select value (react state won't change)
+                          return;
+                        }
+                      } else {
+                        updateTaskField({ status: newStatus });
+                      }
+                    } else {
+                      updateTaskField({ status: newStatus });
+                    }
+                  }}
                   className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
                 >
                   <option value="todo">To Do</option>
@@ -560,13 +606,13 @@ export default function TasksPage() {
 
       if (hasIncompleteSubtasks) {
         // 1. REVERT: Balikin ke posisi awal di UI agar tidak "lompat" sebelum konfirmasi
-        // active.data.current.status berisi status sebelum drag dimulai
-        const originalStatus = active.data.current?.status || 'todo';
+        // Kita paksa render ulang dari state 'tasks' yang belum berubah (karena optimistic update kita hanya update via setter, tapi jika kita tidak commit ke DB dan fetchTasks ulang, mungkin state local sudah kotor karena handleDragOver)
+        // Solusi: Kita fetch ulang saja atau revert manual.
+        // Tapi handleDragOver mengubah state 'tasks' secara real-time.
+        // Kita harus kembalikan item ke status aslinya.
+        // Status asli bisa diambil dari originalStatus yang kita simpan, atau simpelnya: reload data.
 
-        // Kembalikan state React ke semula
-        setTasks((prev) => {
-          return prev.map(t => t.id === activeId ? { ...t, status: originalStatus } : t);
-        });
+        await fetchTasks(); // Revert UI paling aman
 
         // 2. TAMPILKAN MODAL KONFIRMASI
         showModal({
@@ -576,10 +622,8 @@ export default function TasksPage() {
           confirmText: 'Yes, Complete All',
           cancelText: 'Cancel',
           onConfirm: async () => {
-            // 3. JIKA CONFIRM: Update Task status AND Subtasks
             await forceCompleteTask(activeId);
           }
-          // JIKA CANCEL: Tidak melakukan apa-apa (karena sudah di-revert di langkah 1)
         })
         return;
       }
