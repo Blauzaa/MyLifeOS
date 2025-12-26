@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react' // Tambah useRef
 import { createClient } from '../../utils/supabase/client'
 import { Plus, Trash2, Save, Image as ImageIcon, Loader2, Cloud } from 'lucide-react'
 import imageCompression from 'browser-image-compression'
@@ -27,6 +27,9 @@ export default function NotesPage() {
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
   
   const [editTitle, setEditTitle] = useState('')
+  
+  // STATE BARU: Untuk memancing auto-save setiap ada perubahan sekecil apapun
+  const [lastChange, setLastChange] = useState<number>(Date.now())
 
   // --- SETUP EDITOR TIPTAP ---
   const editor = useEditor({
@@ -36,18 +39,19 @@ export default function NotesPage() {
         inline: true,
         allowBase64: true,
         HTMLAttributes: {
-          class: 'rounded-xl max-w-full my-4 border border-white/10 shadow-lg', // Styling gambar otomatis
+          class: 'rounded-xl max-w-full my-4 border border-white/10 shadow-lg',
         },
       }),
     ],
     editorProps: {
       attributes: {
-        class: 'prose prose-invert max-w-none focus:outline-none min-h-[300px]', // Styling area ketik
+        class: 'prose prose-invert max-w-none focus:outline-none min-h-[300px]',
       },
     },
-    onUpdate: ({ editor }) => {
-      // Trigger auto save saat ngetik
+    // INI KUNCINYA: Setiap ada update (ketik/hapus gambar), kita update timestamp
+    onUpdate: () => {
       setSaveStatus('unsaved') 
+      setLastChange(Date.now()) 
     },
   })
 
@@ -63,20 +67,19 @@ export default function NotesPage() {
   // Sync Editor Content saat Note dipilih
   useEffect(() => {
     if (editor && selectedNote) {
-      // Set konten HTML ke editor (Render gambar jadi visual)
-      editor.commands.setContent(selectedNote.content || '')
+      // Cek agar tidak reset kursor saat auto-save (hanya set content jika beda jauh/awal load)
+      const currentHTML = editor.getHTML()
+      if (currentHTML !== selectedNote.content) {
+        editor.commands.setContent(selectedNote.content || '')
+      }
     }
-  }, [selectedNote, editor])
+  }, [selectedNote, editor]) // Hapus dependency lain agar tidak loop
 
-  // ============================================================
-  // 2. FUNGSI UPLOAD KE CLOUDINARY
-  // ============================================================
+  // 2. FUNGSI UPLOAD (Sama seperti sebelumnya)
   const processAndUploadImage = async (file: File) => {
     if (!file.type.startsWith('image/')) return null
-
     try {
       setIsUploading(true)
-      
       const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1200, useWebWorker: true }
       const compressedFile = await imageCompression(file, options)
       
@@ -93,12 +96,9 @@ export default function NotesPage() {
         method: 'POST',
         body: formData
       })
-
       const result = await response.json()
       if (!response.ok) throw new Error(result.error?.message)
-
       return result.secure_url 
-      
     } catch (err) {
       console.error(err)
       alert("Gagal upload gambar")
@@ -108,22 +108,16 @@ export default function NotesPage() {
     }
   }
 
-  // ============================================================
-  // 3. FUNGSI HAPUS GAMBAR DARI CLOUDINARY
-  // ============================================================
+  // 3. FUNGSI HAPUS GAMBAR (Sama seperti sebelumnya)
   const deleteImagesFromCloudinary = async (htmlContent: string) => {
-    // Cari semua URL gambar Cloudinary di dalam konten HTML
     const regex = /res\.cloudinary\.com\/[^/]+\/image\/upload\/v\d+\/([^/.]+)/g;
     let match;
     const publicIds = [];
-
     while ((match = regex.exec(htmlContent)) !== null) {
-      publicIds.push(match[1]); // Ambil Public ID
+      publicIds.push(match[1]);
     }
-
     if (publicIds.length === 0) return;
 
-    // Panggil API Backend Next.js kita untuk hapus gambar
     await Promise.all(publicIds.map(async (id) => {
       await fetch('/api/cloudinary/delete', {
         method: 'POST',
@@ -139,7 +133,7 @@ export default function NotesPage() {
     if (!user || !editor) return
 
     setSaveStatus('saving')
-    const contentHtml = editor.getHTML() // Ambil isi editor sebagai HTML
+    const contentHtml = editor.getHTML()
 
     try {
       if (selectedNote) {
@@ -149,6 +143,7 @@ export default function NotesPage() {
           updated_at: new Date() 
         }).eq('id', selectedNote.id)
 
+        // Update list lokal tanpa fetch ulang
         setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, title: editTitle, content: contentHtml } : n))
       } else {
         const { data } = await supabase.from('notes').insert({
@@ -169,32 +164,28 @@ export default function NotesPage() {
     }
   }
 
-  // 5. AUTO SAVE (Debounce)
+  // 5. AUTO SAVE (DIPERBAIKI)
   useEffect(() => {
+    // Jangan save jika tidak ada note aktif atau editor kosong saat awal
     if (!selectedNote && !editTitle && editor?.isEmpty) return 
 
-    const contentHtml = editor?.getHTML() || ''
-    const isChanged = selectedNote 
-      ? (editTitle !== selectedNote.title || contentHtml !== selectedNote.content)
-      : (editTitle !== '' || !editor?.isEmpty)
-
-    if (!isChanged) return
-
+    // Debounce timer
     const timer = setTimeout(() => {
       saveToDb()
-    }, 1500) // Delay save 1.5 detik
+    }, 1500) 
 
     return () => clearTimeout(timer)
-  }, [editTitle, editor?.state.doc, selectedNote]) // editor state listener
+    
+  // PERUBAHAN PENTING:
+  // Kita memantau 'lastChange' (angka waktu) dan 'editTitle'.
+  // 'lastChange' akan berubah SETIAP KALI ada update di editor (termasuk hapus gambar).
+  }, [lastChange, editTitle]) 
+
 
   // 6. EVENT HANDLERS
-  
-  // Handle Paste Gambar
   const handlePaste = async (e: ClipboardEvent) => {
-    // Tiptap otomatis handle text paste. Kita cuma perlu handle gambar.
     const items = e.clipboardData?.items
     if (!items) return
-
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image') !== -1) {
         e.preventDefault()
@@ -202,21 +193,19 @@ export default function NotesPage() {
         if (file) {
           const url = await processAndUploadImage(file)
           if (url && editor) {
-            editor.chain().focus().setImage({ src: url }).run() // Masukkan gambar ke editor
+            editor.chain().focus().setImage({ src: url }).run()
           }
         }
       }
     }
   }
 
-  // Setup Paste Listener di Editor
   useEffect(() => {
     if (!editor) return
     const dom = editor.view.dom
     dom.addEventListener('paste', handlePaste as any)
     return () => dom.removeEventListener('paste', handlePaste as any)
   }, [editor])
-
 
   const handleManualUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -231,32 +220,24 @@ export default function NotesPage() {
   const createNewNote = () => {
     setSelectedNote(null)
     setEditTitle('')
-    editor?.commands.clearContent() // Kosongkan editor visual
+    editor?.commands.clearContent()
     setSaveStatus('saved')
     setTimeout(() => document.getElementById('note-title')?.focus(), 100)
   }
 
   const selectNote = (note: Note) => {
-    // Sebelum pindah note, save dulu manual kalau status unsaved (opsional)
     setSelectedNote(note)
     setEditTitle(note.title)
-    // Content di-set via useEffect di atas
     setSaveStatus('saved')
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Hapus catatan ini? Gambar di dalamnya juga akan dihapus permanen.")) return
-    
-    // 1. Ambil konten note yg mau dihapus untuk cek gambar
+    if (!confirm("Hapus catatan ini?")) return
     const noteToDelete = notes.find(n => n.id === id)
     if (noteToDelete?.content) {
-      // 2. Hapus gambar di Cloudinary
       await deleteImagesFromCloudinary(noteToDelete.content)
     }
-
-    // 3. Hapus data di Supabase
     await supabase.from('notes').delete().eq('id', id)
-    
     if (selectedNote?.id === id) createNewNote()
     setNotes(prev => prev.filter(n => n.id !== id))
   }
@@ -266,25 +247,13 @@ export default function NotesPage() {
       
       {/* SIDEBAR */}
       <div className="w-full md:w-80 flex flex-col gap-4">
-        <button 
-          onClick={createNewNote}
-          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transition shadow-lg shadow-blue-900/20"
-        >
+        <button onClick={createNewNote} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transition shadow-lg shadow-blue-900/20">
           <Plus size={20}/> New Note
         </button>
-
         <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
           {loading ? <Loader2 className="animate-spin mx-auto mt-10 opacity-20"/> : 
             notes.map(note => (
-              <div 
-                key={note.id}
-                onClick={() => selectNote(note)}
-                className={`p-4 rounded-2xl border cursor-pointer transition-all ${
-                  selectedNote?.id === note.id 
-                  ? 'bg-blue-600 border-blue-500 text-white shadow-lg' 
-                  : 'bg-slate-800/40 border-white/5 hover:bg-white/5 text-slate-400 hover:text-slate-200'
-                }`}
-              >
+              <div key={note.id} onClick={() => selectNote(note)} className={`p-4 rounded-2xl border cursor-pointer transition-all ${selectedNote?.id === note.id ? 'bg-blue-600 border-blue-500 text-white shadow-lg' : 'bg-slate-800/40 border-white/5 hover:bg-white/5 text-slate-400 hover:text-slate-200'}`}>
                 <h3 className="font-bold truncate text-sm">{note.title || 'Untitled'}</h3>
                 <div className="flex justify-between items-center mt-1">
                   <p className="text-[10px] opacity-60">{new Date(note.created_at).toLocaleDateString()}</p>
@@ -297,8 +266,6 @@ export default function NotesPage() {
 
       {/* EDITOR */}
       <div className="flex-1 bg-slate-900 border border-white/5 rounded-3xl flex flex-col overflow-hidden shadow-2xl relative">
-        
-        {/* Toolbar */}
         <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
           <div className="flex gap-2 items-center">
             <div className="flex items-center gap-2 mr-4 px-3 py-1 rounded-full bg-black/20 border border-white/5">
@@ -309,13 +276,11 @@ export default function NotesPage() {
                 {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'unsaved' ? 'Unsaved' : 'Saved'}
               </span>
             </div>
-
-            <label className="cursor-pointer p-2 hover:bg-white/10 rounded-lg text-slate-400 transition" title="Upload Image (Cloudinary)">
+            <label className="cursor-pointer p-2 hover:bg-white/10 rounded-lg text-slate-400 transition" title="Upload Image">
               {isUploading ? <Loader2 className="animate-spin" size={20}/> : <ImageIcon size={20}/>}
               <input type="file" hidden accept="image/*" onChange={handleManualUpload} disabled={isUploading}/>
             </label>
           </div>
-
           {selectedNote && (
             <button onClick={() => handleDelete(selectedNote.id)} className="p-2 hover:bg-red-500/10 text-slate-600 hover:text-red-500 rounded-lg transition">
               <Trash2 size={20}/>
@@ -323,7 +288,6 @@ export default function NotesPage() {
           )}
         </div>
 
-        {/* Input Title */}
         <input 
           id="note-title"
           className="w-full bg-transparent px-8 pt-6 pb-2 text-3xl font-bold outline-none text-slate-100 placeholder:text-slate-600"
@@ -331,12 +295,9 @@ export default function NotesPage() {
           value={editTitle}
           onChange={e => setEditTitle(e.target.value)}
         />
-
-        {/* TIPTAP EDITOR CONTENT */}
         <div className="flex-1 overflow-y-auto px-8 py-4 custom-scrollbar cursor-text" onClick={() => editor?.chain().focus().run()}>
            <EditorContent editor={editor} />
         </div>
-
       </div>
     </div>
   )
