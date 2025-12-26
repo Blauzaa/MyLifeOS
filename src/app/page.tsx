@@ -89,13 +89,12 @@ export default function DashboardOverview() {
   // UI State
   const [loading, setLoading] = useState(true)
   const [modalType, setModalType] = useState<'task' | 'link' | null>(null)
-  const [modalInput, setModalInput] = useState({ title: '', value: '' }) // Generic input
+  const [modalInput, setModalInput] = useState({ title: '', value: '' }) 
   const [toast, setToast] = useState({ show: false, message: '' })
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Helper Format Tanggal
   const todayDate = new Date()
-  const todayStr = todayDate.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })
   const todayISODate = todayDate.toISOString().split('T')[0] 
 
   // --- LOGIC ---
@@ -115,22 +114,43 @@ export default function DashboardOverview() {
       const { data: { user } } = await supabase.auth.getUser()
       setUser(user)
       if (user) {
-        // Parallel Fetching agar lebih cepat
-        const [tasks, links, trans, events] = await Promise.all([
+        // Parallel Fetching
+        const [tasks, links, financeData, events] = await Promise.all([
+            // Hitung Task
             supabase.from('tasks').select('*', { count: 'exact', head: true }).eq('status', 'todo'),
-            supabase.from('dynamic_items').select('*', { count: 'exact', head: true }),
-            supabase.from('transactions').select('amount, type'),
+            
+            // Hitung Links
+            supabase.from('dynamic_items').select('*', { count: 'exact', head: true }).eq('type', 'link'),
+            
+            // PERBAIKAN DI SINI: Menggunakan tabel 'finances', bukan 'transactions'
+            supabase.from('finances').select('amount, type'),
+            
+            // Ambil Event Hari Ini
             supabase.from('events').select('id, title, start_time, end_time')
                 .eq('user_id', user.id).eq('event_date', todayISODate)
                 .order('start_time', { ascending: true }).limit(4)
         ])
 
+        // Kalkulasi Saldo (Income - Expense)
         let bal = 0; 
-        trans.data?.forEach((t: { amount: number, type: string }) => 
-            t.type === 'income' ? bal += Number(t.amount) : bal -= Number(t.amount)
-        )
+        if (financeData.data) {
+            financeData.data.forEach((t: { amount: number, type: string }) => {
+                // Pastikan tipe data number agar kalkulasi benar
+                const amount = Number(t.amount)
+                if (t.type === 'income') {
+                    bal += amount
+                } else {
+                    bal -= amount
+                }
+            })
+        }
         
-        setStats({ tasks: tasks.count || 0, links: links.count || 0, balance: bal })
+        setStats({ 
+            tasks: tasks.count || 0, 
+            links: links.count || 0, 
+            balance: bal 
+        })
+        
         if (events.data) setTodayEvents(events.data as TodayEvent[])
       }
       setLoading(false)
@@ -157,13 +177,12 @@ export default function DashboardOverview() {
                  user_id: user.id
              })
              showToast('Task added successfully!')
-             // Optimistic update
              setStats(prev => ({...prev, tasks: prev.tasks + 1}))
+
           } else if (modalType === 'link') {
-             // Handle Image Link (Requirement 10 implemented here mostly)
              await supabase.from('dynamic_items').insert({
                  title: modalInput.title,
-                 content: modalInput.value, // URL disimpan di content
+                 content: modalInput.value, 
                  type: 'link',
                  user_id: user.id
              })
@@ -223,12 +242,10 @@ export default function DashboardOverview() {
 
       {/* --- HERO SECTION --- */}
       <div className="bg-gradient-to-br from-blue-700 via-indigo-800 to-purple-900 p-8 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden group">
-         {/* Decorative Background */}
          <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-white/15 transition-all duration-1000"></div>
          
          <div className="relative z-10 flex flex-col md:flex-row justify-between md:items-center gap-6">
             <div className="flex items-center gap-5">
-                {/* Avatar Slot (Image Link Logic) */}
                 <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-md border border-white/20 overflow-hidden shadow-inner flex items-center justify-center">
                      {user?.user_metadata?.avatar_url ? (
                          // eslint-disable-next-line @next/next/no-img-element
@@ -269,7 +286,14 @@ export default function DashboardOverview() {
               <div className="grid grid-cols-3 gap-4">
                   {[
                       { label: 'Pending Tasks', val: stats.tasks, icon: CheckCircle2, path: '/tasks', color: 'text-blue-400' },
-                      { label: 'Total Balance', val: new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(stats.balance), icon: Wallet, path: '/finance', color: stats.balance >= 0 ? 'text-emerald-400' : 'text-rose-400' },
+                      { 
+                        label: 'Total Balance', 
+                        // Format ke IDR Rupiah
+                        val: new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(stats.balance), 
+                        icon: Wallet, 
+                        path: '/finance', 
+                        color: stats.balance >= 0 ? 'text-emerald-400' : 'text-rose-400' 
+                      },
                       { label: 'Saved Links', val: stats.links, icon: LinkIcon, path: '/resources', color: 'text-purple-400' }
                   ].map((item, idx) => (
                       <div 
@@ -291,7 +315,7 @@ export default function DashboardOverview() {
                   ))}
               </div>
 
-              {/* Quick Shortcuts (With Modals) */}
+              {/* Quick Shortcuts */}
               <div className="bg-gradient-to-r from-slate-900 to-slate-900/50 border border-white/5 p-6 rounded-[2rem] animate-in slide-in-from-bottom-5 duration-700 delay-300">
                   <h3 className="text-slate-400 font-bold text-xs mb-4 uppercase tracking-widest flex items-center gap-2">
                     <Zap size={14} className="text-yellow-500"/> Quick Actions
