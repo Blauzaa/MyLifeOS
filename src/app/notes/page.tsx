@@ -143,33 +143,38 @@ export default function NotesPage() {
 
   // 4. SAVE LOGIC
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const saveToDb = async () => {
+  // 4. SAVE LOGIC
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const saveToDb = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user || !editor) return
 
     setSaveStatus('saving')
     const contentHtml = editor.getHTML()
 
+    // Payload sanitization
+    const payload = {
+      title: editTitle || 'Untitled Note',
+      content: contentHtml,
+      cover_url: coverUrlInput || null,
+      updated_at: new Date().toISOString()
+    }
+
     try {
       if (selectedNote) {
         // Update existing
-        await supabase.from('notes').update({
-          title: editTitle,
-          content: contentHtml,
-          cover_url: coverUrlInput,
-          updated_at: new Date()
-        }).eq('id', selectedNote.id)
+        const { error } = await supabase.from('notes').update(payload).eq('id', selectedNote.id)
+        if (error) throw error
 
-        setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, title: editTitle, content: contentHtml, cover_url: coverUrlInput } : n))
+        setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, ...payload, cover_url: payload.cover_url || undefined } : n))
       } else {
-        // Create new
-        const { data } = await supabase.from('notes').insert({
-          title: editTitle || 'Untitled Note',
-          content: contentHtml,
-          cover_url: coverUrlInput,
+        // Create new (Fallback logic if selectedNote null but we want to save? usually createNewNote handles this first)
+        const { data, error } = await supabase.from('notes').insert({
+          ...payload,
           user_id: user.id
         }).select().single()
 
+        if (error) throw error
         if (data) {
           setSelectedNote(data)
           setNotes(prev => [data, ...prev])
@@ -177,11 +182,11 @@ export default function NotesPage() {
       }
       setSaveStatus('saved')
     } catch (error: any) {
-      console.error(error)
+      console.error("Save Error:", error)
       setSaveStatus('unsaved')
-      alert(`Gagal menyimpan catatan: ${error.message || 'Unknown error'}`) // Helper feedback
+      // Suppress alert for background saves, only log
     }
-  }
+  }, [editTitle, editor, coverUrlInput, selectedNote])
 
   // 5. AUTO SAVE TRIGGER
   useEffect(() => {
@@ -228,7 +233,7 @@ export default function NotesPage() {
 
     setLoading(true)
     const { data, error } = await supabase.from('notes').insert({
-      title: '', // Draft title
+      title: 'Untitled Note', // Default title
       content: '',
       user_id: user.id
     }).select().single()
@@ -399,6 +404,7 @@ export default function NotesPage() {
               placeholder="Untitled Note"
               value={editTitle}
               onChange={e => setEditTitle(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
             />
             <EditorContent editor={editor} className="min-h-[300px]" />
           </div>
