@@ -12,7 +12,8 @@ import {
   Zap,
   Tv,
   FileText,
-  Github
+  Github,
+  Calendar
 } from 'lucide-react'
 import { createClient } from '../utils/supabase/client'
 import { User } from '@supabase/supabase-js'
@@ -28,6 +29,7 @@ const menus = [
   { name: 'Focus Mode', href: '/focus', icon: Zap },
   { name: 'Watch List', href: '/watchlist', icon: Tv },
   { name: 'Resources', href: '/resources', icon: Layers },
+  { name: 'Calendar', href: '/calendar', icon: Calendar },
 ]
 
 export default function Sidebar() {
