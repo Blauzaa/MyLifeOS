@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '../../utils/supabase/client'
 import FinanceWidget from '../../components/FinanceWidget'
 import { TransactionItem } from '../../types'
-import { Wallet, RefreshCw } from 'lucide-react'
+import { RefreshCw } from 'lucide-react'
 
 export default function FinancePage() {
   const supabase = createClient()
@@ -66,10 +66,6 @@ export default function FinancePage() {
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-200 font-sans">
       
-      {/* LOGIC RESPONSIF:
-        - Mobile: ml-0 (Sidebar biasanya hidden/hamburger)
-        - Desktop (md ke atas): ml-64 (Untuk memberi ruang Sidebar LifeOS kamu)
-      */}
       <main className="flex-1 w-full md:ml-64 transition-all duration-300 ease-in-out">
         
         {/* Header Section */}
@@ -90,14 +86,14 @@ export default function FinancePage() {
           </button>
         </header>
 
-        {/* Content Section - MENGISI PENUH LAYAR */}
-        <div className="p-4 md:p-8 w-full max-w-[1920px] mx-auto">
+        {/* Content Section - FIXED: Menggunakan max-w-6xl agar lebih simetris di tengah */}
+        <div className="p-4 md:p-8 w-full max-w-6xl mx-auto space-y-8">
             {loading ? (
                <div className="flex flex-col gap-6 animate-pulse">
-                  <div className="h-48 bg-slate-900 rounded-2xl w-full"></div>
+                  <div className="h-40 bg-slate-900 rounded-3xl w-full"></div>
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                      <div className="h-96 bg-slate-900 rounded-2xl lg:col-span-2"></div>
-                      <div className="h-96 bg-slate-900 rounded-2xl"></div>
+                      <div className="h-[500px] bg-slate-900 rounded-3xl lg:col-span-2"></div>
+                      <div className="h-[400px] bg-slate-900 rounded-3xl"></div>
                   </div>
                </div>
             ) : (

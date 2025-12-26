@@ -1,10 +1,10 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '../../utils/supabase/client'
 import { 
   Plus, Trash2, CheckCircle, Clock, Loader2, 
   Calendar, CheckSquare, X, AlertCircle, Image as ImageIcon,
-  Link as LinkIcon
+  Link as LinkIcon, UploadCloud
 } from 'lucide-react'
 import { useModal } from '../../context/ModalContext'
 
@@ -33,6 +33,11 @@ import { CSS } from '@dnd-kit/utilities';
 
 const supabase = createClient()
 
+// --- CLOUDINARY CONFIG ---
+// Ganti dengan kredensial Cloudinary Anda
+const CLOUDINARY_CLOUD_NAME = 'your_cloud_name'; 
+const CLOUDINARY_UPLOAD_PRESET = 'your_unsigned_preset'; 
+
 // --- Types ---
 interface Subtask {
   id: string
@@ -55,14 +60,68 @@ interface Task {
 }
 
 // ==========================================
-// 1. IMPROVED TASK EDIT MODAL
+// 1. IMPROVED TASK EDIT MODAL (WITH PASTE & UPLOAD)
 // ==========================================
 const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => void, onUpdate: () => void }) => {
   const [localTask, setLocalTask] = useState<Task>(task)
   const [subtaskInput, setSubtaskInput] = useState('')
   const [showUrlInput, setShowUrlInput] = useState(false)
+  const [isUploading, setIsUploading] = useState(false) // State loading upload
 
-  // HANDLE ESC KEY
+  // Helper: Upload ke Cloudinary
+  const uploadImage = async (file: File) => {
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+
+    try {
+      const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) throw new Error('Upload failed');
+      
+      const data = await response.json();
+      const imageUrl = data.secure_url;
+
+      // Update Local & Supabase
+      updateTaskField({ cover_url: imageUrl });
+      setShowUrlInput(false);
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      alert('Failed to upload image. Please check your Cloudinary config.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Event Listener untuk Paste (Ctrl+V)
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      // Hanya proses jika ada items
+      if (!e.clipboardData?.items) return;
+
+      const items = e.clipboardData.items;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          e.preventDefault(); // Mencegah paste default jika sedang di textarea
+          const file = items[i].getAsFile();
+          if (file) {
+            uploadImage(file);
+          }
+          break; // Hanya ambil gambar pertama
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Handle ESC Key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -111,13 +170,11 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
-      {/* Container Modal (Stop Propagation agar klik di dalam tidak menutup modal) */}
       <div 
         className="relative bg-slate-900 border border-white/10 w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()} 
       >
         
-        {/* CLOSE BUTTON (FIXED POSITION) */}
         <button 
             onClick={onClose} 
             className="absolute top-3 right-3 z-50 p-2 bg-black/50 hover:bg-red-500/80 text-white rounded-full transition-all backdrop-blur-md group shadow-lg border border-white/10"
@@ -127,19 +184,28 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
         </button>
 
         {/* Cover Image Area */}
-        <div className="relative h-32 bg-slate-800/50 border-b border-white/5 group flex-shrink-0">
+        <div className="relative h-36 bg-slate-800/50 border-b border-white/5 group flex-shrink-0">
+            {isUploading ? (
+               <div className="w-full h-full flex flex-col items-center justify-center text-blue-400 bg-slate-950/80 absolute z-20">
+                  <Loader2 className="animate-spin mb-2" size={32} />
+                  <span className="text-xs font-bold animate-pulse">UPLOADING IMAGE...</span>
+               </div>
+            ) : null}
+
             {localTask.cover_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={localTask.cover_url} alt="Cover" className="w-full h-full object-cover opacity-80" />
             ) : (
-                <div className="w-full h-full flex items-center justify-center text-slate-600 text-sm bg-slate-950">
-                    <ImageIcon size={20} className="mr-2"/> No Cover Image
+                <div className="w-full h-full flex flex-col items-center justify-center text-slate-600 text-sm bg-slate-950">
+                    <ImageIcon size={24} className="mb-2"/> 
+                    <p>No Cover Image</p>
+                    <p className="text-xs text-slate-700 mt-1">Ctrl+V to paste image</p>
                 </div>
             )}
             
-            <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
                  <button onClick={() => setShowUrlInput(!showUrlInput)} className="bg-black/60 hover:bg-black/80 text-white px-3 py-1 rounded-full text-xs flex items-center backdrop-blur-md border border-white/10">
-                    <LinkIcon size={12} className="mr-1"/> {localTask.cover_url ? 'Change Cover' : 'Add Cover'}
+                    <LinkIcon size={12} className="mr-1"/> {localTask.cover_url ? 'Change URL' : 'Add URL'}
                  </button>
             </div>
         </div>
@@ -149,11 +215,11 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
             <div className="bg-slate-800 p-3 border-b border-white/10 flex gap-2 animate-in slide-in-from-top-2">
                 <input 
                     type="text" 
-                    placeholder="Paste image URL here (https://...)" 
+                    placeholder="Paste image URL here..." 
                     className="flex-1 bg-slate-950 border border-white/10 rounded px-3 py-1 text-sm text-white focus:border-blue-500 outline-none"
                     defaultValue={localTask.cover_url || ''}
                     onBlur={(e) => {
-                        updateTaskField({ cover_url: e.target.value })
+                        if(e.target.value) updateTaskField({ cover_url: e.target.value })
                         setShowUrlInput(false)
                     }}
                     onKeyDown={(e) => {
@@ -168,7 +234,7 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
         )}
 
         <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col md:flex-row bg-slate-900">
-            {/* LEFT COLUMN: Main Content */}
+            {/* LEFT COLUMN */}
             <div className="flex-1 p-6 border-r border-white/5">
                 <input 
                     value={localTask.title} 
@@ -180,9 +246,7 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
 
                 <div className="space-y-6">
                     <div>
-                        <label className="text-xs text-slate-400 uppercase font-bold flex items-center gap-2 mb-2">
-                             Description
-                        </label>
+                        <label className="text-xs text-slate-400 uppercase font-bold flex items-center gap-2 mb-2">Description</label>
                         <textarea 
                             className="w-full bg-slate-800/30 border border-white/5 rounded-xl p-3 text-sm min-h-[100px] outline-none resize-none focus:bg-slate-800/50 transition"
                             placeholder="Add a more detailed description..."
@@ -203,7 +267,6 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
                         </div>
                         
                         <div className="space-y-2">
-                             {/* Progress Bar */}
                              <div className="w-full bg-slate-800 h-1 rounded-full overflow-hidden mb-3">
                                  <div 
                                     className="bg-blue-500 h-full transition-all duration-300" 
@@ -240,7 +303,7 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
                 </div>
             </div>
 
-            {/* RIGHT COLUMN: Metadata */}
+            {/* RIGHT COLUMN */}
             <div className="w-full md:w-64 bg-slate-900/50 p-6 space-y-6 border-l border-white/5">
                  <div className="space-y-4 pt-4 md:pt-0">
                      <div className="space-y-1">
@@ -288,13 +351,12 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
 }
 
 // ==========================================
-// 2. SORTABLE TASK CARD
+// 2. SORTABLE TASK CARD (UNCHANGED)
 // ==========================================
 const SortableTaskCard = ({ task, onClick, onDeleteRequest }: { task: Task, onClick: () => void, onDeleteRequest: (id: string) => void }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id, data: { ...task } });
 
   const style = { transform: CSS.Translate.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
-
   const priorityColor = { high: 'bg-red-500', medium: 'bg-orange-500', low: 'bg-blue-500' }[task.priority || 'medium']
   
   const doneSubtasks = task.subtasks.filter(s => s.is_completed).length
@@ -344,7 +406,7 @@ const SortableTaskCard = ({ task, onClick, onDeleteRequest }: { task: Task, onCl
 }
 
 // ==========================================
-// 3. TASK COLUMN
+// 3. TASK COLUMN (UNCHANGED)
 // ==========================================
 const TaskColumn = ({ title, status, icon: Icon, color, tasks, onTaskClick, onDeleteRequest, delay }: any) => {
     const { setNodeRef } = useSortable({ id: status, data: { type: 'container', status } });
@@ -477,6 +539,8 @@ export default function TasksPage() {
     if (!over) return;
 
     const overId = over.id as string;
+    
+    // Helper to find target container status
     const findContainer = (id: string) => {
         if (['todo', 'doing', 'done'].includes(id)) return id;
         return tasks.find(t => t.id === id)?.status;
@@ -487,42 +551,59 @@ export default function TasksPage() {
 
     if (!item || !targetStatus) return;
 
-    // --- CHECK: Unfinished Subtasks Logic ---
+    // === LOGIKA BARU FORCE DONE ===
     if (targetStatus === 'done' && item.subtasks.length > 0) {
         const hasIncompleteSubtasks = item.subtasks.some(s => !s.is_completed);
         
         if (hasIncompleteSubtasks) {
-           // 1. REVERT: Force status back to original (from before drag started)
-           // active.data.current holds the state when drag BEGAN
+           // 1. REVERT: Balikin ke posisi awal di UI agar tidak "lompat" sebelum konfirmasi
+           // active.data.current.status berisi status sebelum drag dimulai
            const originalStatus = active.data.current?.status || 'todo';
            
+           // Kembalikan state React ke semula
            setTasks((prev) => {
              return prev.map(t => t.id === activeId ? { ...t, status: originalStatus } : t);
            });
 
-           // 2. ASK CONFIRMATION
+           // 2. TAMPILKAN MODAL KONFIRMASI
            showModal({
-             title: 'Unfinished Work',
-             message: `"${item.title}" still has pending subtasks. Do you want to force complete it?`,
+             title: 'Incomplete Subtasks',
+             message: `"${item.title}" still has pending subtasks. Do you want to check them all as completed and move to Done?`,
              type: 'warning',
-             confirmText: 'Force Complete',
+             confirmText: 'Yes, Complete All',
+             cancelText: 'Cancel',
              onConfirm: async () => {
-                // 3. IF CONFIRM: Update to Done
-                await updateTaskStatusAndOrder(activeId, 'done');
+                // 3. JIKA CONFIRM: Update Task status AND Subtasks
+                await forceCompleteTask(activeId);
              }
-             // IF CANCEL: Do nothing (already reverted in step 1)
+             // JIKA CANCEL: Tidak melakukan apa-apa (karena sudah di-revert di langkah 1)
            })
            return; 
         }
     }
     
-    // Normal update
+    // Update normal jika tidak ada masalah subtask
     await updateTaskStatusAndOrder(activeId, targetStatus as string);
   };
 
   const updateTaskStatusAndOrder = async (taskId: string, status: string) => {
+      // Optimistic Update sudah terjadi di handleDragOver, 
+      // kita hanya perlu memastikan DB sinkron untuk status final.
       await supabase.from('tasks').update({ status }).eq('id', taskId);
+      // Fetch ulang untuk memastikan data konsisten
       fetchTasks(); 
+  }
+
+  // Fungsi khusus: Pindah ke Done + Centang semua Subtask
+  const forceCompleteTask = async (taskId: string) => {
+      // 1. Update Subtasks -> is_completed: true
+      await supabase.from('subtasks').update({ is_completed: true }).eq('task_id', taskId);
+      
+      // 2. Update Task -> status: 'done'
+      await supabase.from('tasks').update({ status: 'done' }).eq('id', taskId);
+
+      // 3. Refresh Data
+      fetchTasks();
   }
 
   return (
