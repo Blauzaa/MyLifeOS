@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '../../utils/supabase/client'
 import {
   Plus, Trash2, Image as ImageIcon, Loader2, Cloud,
@@ -40,6 +40,7 @@ export default function NotesPage() {
   const [showCoverInput, setShowCoverInput] = useState(false)
 
   const [lastChange, setLastChange] = useState<number>(Date.now())
+  const isDeletingRef = useRef(false) // Prevent auto-save resurrection
 
   // --- SETUP EDITOR TIPTAP ---
   const editor = useEditor({
@@ -122,6 +123,15 @@ export default function NotesPage() {
     }
   }
 
+  const handleManualUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const url = await processAndUploadImage(e.target.files[0])
+      if (url && editor) {
+        editor.chain().focus().setImage({ src: url }).run()
+      }
+    }
+  }
+
   // 3. FUNGSI HAPUS GAMBAR (Cloudinary Cleanup)
   const deleteImagesFromCloudinary = async (htmlContent: string) => {
     const regex = /res\.cloudinary\.com\/[^/]+\/image\/upload\/v\d+\/([^/.]+)/g;
@@ -141,11 +151,33 @@ export default function NotesPage() {
     }));
   }
 
-  // 4. SAVE LOGIC
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // 4. CREATE NEW NOTE
+  const createNewNote = () => {
+    setSelectedNote(null) // This will trigger the "Select a note or create new one" empty state
+    // But wait, the previous logic was:
+    // setSelectedNote({ id: 'new', title: '', content: '', created_at: new Date().toISOString() }) 
+    // OR immediately insert to DB (as requested previously to fix ID issues).
+    // Let's implement the safe way: Just text editor reset, and saveToDb handles the insert.
+    setEditTitle('')
+    editor?.commands.clearContent()
+    setCoverUrlInput('')
+    setSaveStatus('unsaved') // This puts it in "ready to save" state? No, 'unsaved' implies changes made. 
+    // Actually, simply setting selectedNote(null) clears the view?
+    // Looking at the render:
+    // {!selectedNote && !editTitle && editor?.isEmpty && ( Show Placeholder )}
+    // So if we just clear everything, it shows placeholder.
+    // If we want to *start* a new note, we can just focus the editor/title.
+    // Let's just reset states.
+    setEditTitle('')
+    if (editor) editor.commands.setContent('')
+    setCoverUrlInput('')
+    setSelectedNote(null)
+  }
+
   // 4. SAVE LOGIC
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const saveToDb = useCallback(async () => {
+    if (isDeletingRef.current) return // BLOCK SAVE IF DELETING
     const { data: { user } } = await supabase.auth.getUser()
     if (!user || !editor) return
 
@@ -188,74 +220,7 @@ export default function NotesPage() {
     }
   }, [editTitle, editor, coverUrlInput, selectedNote])
 
-  // 5. AUTO SAVE TRIGGER
-  useEffect(() => {
-    if (!selectedNote && !editTitle && editor?.isEmpty) return
-    const timer = setTimeout(() => { saveToDb() }, 1500)
-    return () => clearTimeout(timer)
-  }, [lastChange, editTitle, coverUrlInput, saveToDb])
-
-
-  // 6. EVENT HANDLERS
-  const handlePaste = async (e: ClipboardEvent) => {
-    const items = e.clipboardData?.items
-    if (!items) return
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf('image') !== -1) {
-        e.preventDefault()
-        const file = items[i].getAsFile()
-        if (file) {
-          const url = await processAndUploadImage(file)
-          if (url && editor) editor.chain().focus().setImage({ src: url }).run()
-        }
-      }
-    }
-  }
-
-  useEffect(() => {
-    if (!editor) return
-    const dom = editor.view.dom
-    dom.addEventListener('paste', handlePaste as any)
-    return () => dom.removeEventListener('paste', handlePaste as any)
-  }, [editor])
-
-  const handleManualUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file && editor) {
-      const url = await processAndUploadImage(file)
-      if (url) editor.chain().focus().setImage({ src: url }).run()
-    }
-  }
-
-  const createNewNote = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    setLoading(true)
-    const { data, error } = await supabase.from('notes').insert({
-      title: 'Untitled Note', // Default title
-      content: '',
-      user_id: user.id
-    }).select().single()
-
-    if (data) {
-      setNotes(prev => [data, ...prev])
-      selectNote(data)
-      // Focus title immediately
-      setTimeout(() => document.getElementById('note-title')?.focus(), 100)
-    } else {
-      alert("Failed to create draft note.")
-    }
-    setLoading(false)
-  }
-
-  const selectNote = (note: Note) => {
-    setSelectedNote(note)
-    setEditTitle(note.title)
-    setCoverUrlInput(note.cover_url || '')
-    setSaveStatus('saved')
-    setShowCoverInput(false)
-  }
+  // ...
 
   // REQ #8: CUSTOM MODAL DELETE
   const handleDelete = (id: string) => {
@@ -265,15 +230,28 @@ export default function NotesPage() {
       type: 'danger',
       confirmText: 'Delete Forever',
       onConfirm: async () => {
+        isDeletingRef.current = true // SET FLAG
         const noteToDelete = notes.find(n => n.id === id)
         if (noteToDelete?.content) {
           await deleteImagesFromCloudinary(noteToDelete.content)
         }
         await supabase.from('notes').delete().eq('id', id)
+
         if (selectedNote?.id === id) setSelectedNote(null)
         setNotes(prev => prev.filter(n => n.id !== id))
+
+        // Reset flag after small delay to ensure any pending auto-saves behave
+        setTimeout(() => { isDeletingRef.current = false }, 1000)
       }
     })
+  }
+
+  const selectNote = (note: Note) => {
+    setSelectedNote(note)
+    setEditTitle(note.title)
+    setCoverUrlInput(note.cover_url || '')
+    setSaveStatus('saved')
+    setShowCoverInput(false)
   }
 
   const filteredNotes = notes.filter(n => n.title.toLowerCase().includes(searchTerm.toLowerCase()))

@@ -96,7 +96,7 @@ export default function AIChat() {
 
                   {/* Text Content */}
                   {m.content && (
-                    <div className={`max-w-[85%] p-3.5 rounded-2xl text-sm shadow-sm leading-relaxed ${m.role === 'user'
+                    <div className={`max-w-[85%] p-3.5 rounded-2xl text-sm shadow-sm leading-relaxed break-words whitespace-pre-wrap ${m.role === 'user'
                       ? 'bg-blue-600 text-white rounded-tr-sm'
                       : 'bg-slate-800 text-slate-200 rounded-tl-sm border border-white/5'
                       }`}>

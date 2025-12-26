@@ -30,16 +30,17 @@ export async function POST(req: Request) {
       2. FINANCE: Record income/expenses. Keywords: "spent", "paid", "salary", "jajan", "bayar", "masuk", "uang".
       3. NOTES: Write thoughts/drafts. Keywords: "write", "draft", "note", "catat", "ide", "tulis".
       4. CALENDAR: Schedule events. Detect dates like "tomorrow", "next friday", "besok", "minggu depan".
-      5. ACTIONS: Navigate the app. Keywords: "focus mode", "open calendar", "buka finance".
+      5. WATCHLIST: Add movies/series to watch using addWatchlist tool. Keywords: "watch", "nonton", "film", "series", "anime", "cinta dika", "judul".
+      6. ACTIONS: Navigate the app. Keywords: "focus mode", "open calendar", "buka finance".
 
       LANGUAGE:
       - Understand English, Indonesian, and mixed (Jaksel/Sunda/Javanese slang ok).
       - Be smart: "Beli kopi 25rb" -> Finance (Expense, 25000, "Beli kopi").
-      - "Meeting besok jam 10" -> Calendar (Event, Tomorrow's date, 10:00).
+      - "Tambahkan watchlist judul cinta dika..." -> Watchlist (Title="Cinta Dika", Type="movie").
       
       RULES:
-      - If amount is mentioned (e.g., 50k, 50.000), interpret as FINANCE unless clearly a task.
-      - If "Focus" mentioned, use triggerAction('start_focus').
+      - If user says "watch" or "nonton", PRIORITY is WATCHLIST tool, NOT Task or Note.
+      - If amount is mentioned (e.g., 50k, 50.000), interpret as FINANCE.
       `,
       maxSteps: 5,
       tools: {
@@ -95,10 +96,43 @@ export async function POST(req: Request) {
             return error ? `Error: ${error.message}` : `📅 Event scheduled: "${title}" on ${event_date}`;
           }
         }),
+        addWatchlist: tool({
+          description: 'Add movie/series to watchlist',
+          parameters: z.object({
+            title: z.string().describe('Title of the movie/series'),
+            type: z.enum(['movie', 'series', 'anime']).default('movie'),
+            status: z.enum(['plan', 'watching', 'finished']).default('plan'),
+            link: z.string().optional().describe('Link to stream/info'),
+            synopsis: z.string().optional().describe('Short description')
+          }),
+          execute: async ({ title, type, status, link, synopsis }) => {
+            if (!user) return 'Error: Login required.';
+            const { error } = await supabase.from('watchlist').insert({
+              title, type, status, link, synopsis, user_id: user.id
+            });
+            return error ? `Error: ${error.message}` : `🎬 Added to Watchlist: "${title}"`;
+          }
+        }),
+        addResource: tool({
+          description: 'Save a bookmark link or snippet',
+          parameters: z.object({
+            title: z.string(),
+            url: z.string().describe('URL link').optional(),
+            type: z.enum(['link', 'snippet']).default('link')
+          }),
+          execute: async ({ title, url, type }) => {
+            if (!user) return 'Error: Login required.';
+            if (type === 'link' && url) {
+              const { error } = await supabase.from('dynamic_items').insert({ title, url, type: 'link', user_id: user.id });
+              return error ? `Error: ${error.message}` : `🔗 Link Saved: "${title}"`;
+            }
+            return 'Error: Snippets not fully supported via chat yet.';
+          }
+        }),
         triggerAction: tool({
           description: 'Trigger client-side navigation or special mode',
           parameters: z.object({
-            action: z.enum(['start_focus', 'open_finance', 'open_calendar', 'open_tasks', 'open_notes']).describe('The action to perform')
+            action: z.enum(['start_focus', 'open_finance', 'open_calendar', 'open_tasks', 'open_notes', 'open_resources']).describe('The action to perform')
           }),
           execute: async ({ action }) => {
             // This tool doesn't touch DB, just signals client
