@@ -2,14 +2,17 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation' // <--- 1. Import Router
 import { createClient } from '../utils/supabase/client'
 import { 
   Wallet, CheckCircle2, Link as LinkIcon, 
-  ArrowUpRight, Calendar, Activity, Zap, TrendingUp 
+  ArrowUpRight, Calendar, Activity, Zap, TrendingUp, Plus 
 } from 'lucide-react'
 import { User } from '@supabase/supabase-js'
 
-// --- QUOTES DATA (Bisa diganti API kalau mau) ---
+// Import Context Modal (Pastikan path import sesuai dengan struktur foldermu)
+import { useModal } from '../context/ModalContext' 
+
 const QUOTES = [
   { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
   { text: "Productivity is being able to do things that you were never able to do before.", author: "Franz Kafka" },
@@ -19,58 +22,67 @@ const QUOTES = [
 
 export default function DashboardOverview() {
   const supabase = createClient()
+  const router = useRouter() // <--- 2. Init Router
+  
+  // Ambil fungsi openModal dari context (sesuaikan nama fungsinya dengan yang ada di ModalContext.tsx kamu)
+  // Biasanya namanya openModal, setIsOpen, atau toggleModal
+  const { showModal } = useModal()
+
   const [stats, setStats] = useState({ tasks: 0, links: 0, balance: 0, income: 0, expense: 0 })
   const [user, setUser] = useState<User | null>(null)
   const [quote, setQuote] = useState(QUOTES[0])
 
   useEffect(() => {
-    // Random quote on load
     setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)])
 
     const getData = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       setUser(user)
       if (user) {
-        // 1. Hitung Task (Pending)
         const { count: taskCount } = await supabase.from('tasks').select('*', { count: 'exact', head: true }).eq('status', 'todo')
-        
-        // 2. Hitung Links
         const { count: linkCount } = await supabase.from('dynamic_items').select('*', { count: 'exact', head: true })
-        
-        // 3. Hitung Keuangan Detail
         const { data: trans } = await supabase.from('transactions').select('amount, type')
+        
         let income = 0, expense = 0
         trans?.forEach((t: { amount: number, type: string }) => 
           t.type === 'income' ? income += Number(t.amount) : expense += Number(t.amount)
         )
 
-        setStats({ 
-            tasks: taskCount || 0, 
-            links: linkCount || 0, 
-            balance: income - expense,
-            income, 
-            expense 
-        })
+        setStats({ tasks: taskCount || 0, links: linkCount || 0, balance: income - expense, income, expense })
       }
     }
     getData()
   }, [])
 
-  // Helper untuk format tanggal: "Friday, 24 Oct"
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })
+  const formatRupiah = (num: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num)
 
-  // Helper Format Rupiah
-  const formatRupiah = (num: number) => {
-    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num)
+  // --- ACTIONS HANDLER ---
+  const handleStartFocus = () => {
+    router.push('/focus')
+  }
+
+const handleNewTask = () => {
+  showModal({
+    title: 'Create New Task',
+    message: 'Do you want to create a new task?',
+    type: 'info',
+    confirmText: 'Create',
+    onConfirm: () => {
+      router.push('/tasks')
+    }
+  })
+}
+
+  const handleAddLink = () => {
+    router.push('/resources')
   }
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       
-      {/* --- 1. HERO BANNER --- */}
+      {/* --- HERO BANNER --- */}
       <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 p-8 md:p-10 shadow-2xl shadow-indigo-900/20 text-white border border-white/10 group">
-        
-        {/* Decorative Background Elements */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-white/20 transition-all duration-1000"></div>
         <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-500/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2"></div>
 
@@ -87,41 +99,39 @@ export default function DashboardOverview() {
             </p>
           </div>
           
-          {/* Quick Action Button (Misal untuk Focus) */}
+          {/* TOMBOL START FOCUS */}
           <div className="hidden md:block">
-             <button className="bg-white text-blue-700 px-6 py-3 rounded-2xl font-bold shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2">
+             <button 
+                onClick={handleStartFocus} 
+                className="bg-white text-blue-700 px-6 py-3 rounded-2xl font-bold shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2 cursor-pointer"
+             >
                <Zap size={20} className="fill-blue-700"/> Start Focus
              </button>
           </div>
         </div>
       </div>
 
-      {/* --- 2. STATS GRID --- */}
+      {/* --- STATS GRID (Klik Card juga bisa navigasi) --- */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
-        {/* Card: TASKS */}
-        <div className="group bg-slate-800/40 backdrop-blur-xl p-6 rounded-3xl border border-white/5 hover:border-blue-500/30 hover:bg-slate-800/60 transition-all duration-300 relative overflow-hidden">
+        {/* Card: TASKS (Klik -> Tasks) */}
+        <div onClick={() => router.push('/tasks')} className="group cursor-pointer bg-slate-800/40 backdrop-blur-xl p-6 rounded-3xl border border-white/5 hover:border-blue-500/30 hover:bg-slate-800/60 transition-all duration-300 relative overflow-hidden">
            <div className="absolute -right-6 -top-6 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl group-hover:bg-blue-500/20 transition-all"></div>
-           
            <div className="flex justify-between items-start mb-4">
               <div className="p-3 bg-blue-500/20 rounded-2xl text-blue-400 group-hover:scale-110 transition-transform duration-300">
                 <CheckCircle2 size={24} />
               </div>
-              <span className="text-xs font-bold bg-blue-500/10 text-blue-300 px-2 py-1 rounded-lg border border-blue-500/20">
-                Todo
-              </span>
+              <span className="text-xs font-bold bg-blue-500/10 text-blue-300 px-2 py-1 rounded-lg border border-blue-500/20">Todo</span>
            </div>
-           
            <div>
               <h2 className="text-4xl font-bold text-white mb-1 group-hover:translate-x-1 transition-transform">{stats.tasks}</h2>
               <p className="text-slate-400 text-sm font-medium">Pending Tasks</p>
            </div>
         </div>
 
-        {/* Card: FINANCE */}
-        <div className="group bg-slate-800/40 backdrop-blur-xl p-6 rounded-3xl border border-white/5 hover:border-emerald-500/30 hover:bg-slate-800/60 transition-all duration-300 relative overflow-hidden">
+        {/* Card: FINANCE (Klik -> Finance) */}
+        <div onClick={() => router.push('/finance')} className="group cursor-pointer bg-slate-800/40 backdrop-blur-xl p-6 rounded-3xl border border-white/5 hover:border-emerald-500/30 hover:bg-slate-800/60 transition-all duration-300 relative overflow-hidden">
            <div className="absolute -right-6 -top-6 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl group-hover:bg-emerald-500/20 transition-all"></div>
-           
            <div className="flex justify-between items-start mb-4">
               <div className="p-3 bg-emerald-500/20 rounded-2xl text-emerald-400 group-hover:scale-110 transition-transform duration-300">
                 <Wallet size={24} />
@@ -130,7 +140,6 @@ export default function DashboardOverview() {
                 <TrendingUp size={12}/> {stats.balance >= 0 ? 'Healthy' : 'Deficit'}
               </span>
            </div>
-           
            <div>
               <h2 className="text-3xl font-bold text-white mb-1 tracking-tight truncate group-hover:translate-x-1 transition-transform">
                 {formatRupiah(stats.balance)}
@@ -139,17 +148,15 @@ export default function DashboardOverview() {
            </div>
         </div>
 
-        {/* Card: RESOURCES */}
-        <div className="group bg-slate-800/40 backdrop-blur-xl p-6 rounded-3xl border border-white/5 hover:border-purple-500/30 hover:bg-slate-800/60 transition-all duration-300 relative overflow-hidden">
+        {/* Card: RESOURCES (Klik -> Resources) */}
+        <div onClick={() => router.push('/resources')} className="group cursor-pointer bg-slate-800/40 backdrop-blur-xl p-6 rounded-3xl border border-white/5 hover:border-purple-500/30 hover:bg-slate-800/60 transition-all duration-300 relative overflow-hidden">
            <div className="absolute -right-6 -top-6 w-24 h-24 bg-purple-500/10 rounded-full blur-2xl group-hover:bg-purple-500/20 transition-all"></div>
-           
            <div className="flex justify-between items-start mb-4">
               <div className="p-3 bg-purple-500/20 rounded-2xl text-purple-400 group-hover:scale-110 transition-transform duration-300">
                 <LinkIcon size={24} />
               </div>
               <ArrowUpRight size={16} className="text-slate-500 group-hover:text-purple-400 transition-colors"/>
            </div>
-           
            <div>
               <h2 className="text-4xl font-bold text-white mb-1 group-hover:translate-x-1 transition-transform">{stats.links}</h2>
               <p className="text-slate-400 text-sm font-medium">Saved Resources</p>
@@ -158,7 +165,7 @@ export default function DashboardOverview() {
 
       </div>
 
-      {/* --- 3. QUICK STATS ROW (Optional Addition) --- */}
+      {/* --- QUICK ACTIONS ROW --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Income vs Expense Mini Bar */}
           <div className="bg-slate-900/50 p-6 rounded-3xl border border-white/5">
@@ -172,7 +179,7 @@ export default function DashboardOverview() {
                       <span className="text-white">{formatRupiah(stats.income)}</span>
                    </div>
                    <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: '70%' }}></div> {/* Dummy width visual */}
+                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: stats.income + stats.expense > 0 ? `${(stats.income / (stats.income + stats.expense)) * 100}%` : '0%' }}></div>
                    </div>
                 </div>
                 <div>
@@ -181,7 +188,7 @@ export default function DashboardOverview() {
                       <span className="text-white">{formatRupiah(stats.expense)}</span>
                    </div>
                    <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-red-500 rounded-full" style={{ width: '40%' }}></div> {/* Dummy width visual */}
+                      <div className="h-full bg-red-500 rounded-full" style={{ width: stats.income + stats.expense > 0 ? `${(stats.expense / (stats.income + stats.expense)) * 100}%` : '0%' }}></div>
                    </div>
                 </div>
              </div>
@@ -191,11 +198,20 @@ export default function DashboardOverview() {
           <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 rounded-3xl border border-white/5 flex flex-col justify-center items-center text-center">
              <p className="text-slate-400 text-sm mb-4">Ready to be productive?</p>
              <div className="flex gap-3">
-                <button className="bg-white/5 hover:bg-white/10 text-white px-4 py-2 rounded-xl text-sm font-bold border border-white/10 transition">
-                   New Task
+                {/* TOMBOL NEW TASK */}
+                <button 
+                  onClick={handleNewTask}
+                  className="bg-white/5 hover:bg-blue-600 hover:text-white hover:border-blue-500 text-white px-5 py-3 rounded-xl text-sm font-bold border border-white/10 transition flex items-center gap-2"
+                >
+                   <Plus size={16}/> New Task
                 </button>
-                <button className="bg-white/5 hover:bg-white/10 text-white px-4 py-2 rounded-xl text-sm font-bold border border-white/10 transition">
-                   Add Link
+                
+                {/* TOMBOL ADD LINK */}
+                <button 
+                  onClick={handleAddLink}
+                  className="bg-white/5 hover:bg-purple-600 hover:text-white hover:border-purple-500 text-white px-5 py-3 rounded-xl text-sm font-bold border border-white/10 transition flex items-center gap-2"
+                >
+                   <LinkIcon size={16}/> Add Link
                 </button>
              </div>
           </div>
