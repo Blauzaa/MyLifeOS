@@ -41,7 +41,9 @@ interface FocusContextType {
   sessions: any[]
   cycles: number
   refreshSessions: () => void
+  clearSessions: () => void 
 }
+
 
 const FocusContext = createContext<FocusContextType | undefined>(undefined)
 
@@ -58,6 +60,10 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     focusDuration: 60, shortBreakDuration: 5, longBreakDuration: 10, longBreakInterval: 3, autoStart: false
   })
 
+const clearSessions = () => {
+  setSessions([])
+  setCycles(0)
+}
   // State Audio
   const [trackIndex, setTrackIndex] = useState(0)
   const [isPlayingAudio, setIsPlayingAudio] = useState(false)
@@ -153,12 +159,29 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <FocusContext.Provider value={{
-      mode, timeLeft, isActive, setIsActive, switchMode,
-      taskName, setTaskName, config, setConfig,
-      isPlayingAudio, toggleAudio, trackIndex, changeTrack, volume, setVolume,
-      sessions, cycles, refreshSessions: fetchSessions, totalDuration: getTotalDuration()
-    }}>
+<FocusContext.Provider value={{
+  mode,
+  timeLeft,
+  isActive,
+  setIsActive,
+  switchMode,
+  taskName,
+  setTaskName,
+  config,
+  setConfig,
+  isPlayingAudio,
+  toggleAudio,
+  trackIndex,
+  changeTrack,
+  volume,
+  setVolume,
+  sessions,
+  cycles,
+  refreshSessions: fetchSessions,
+  totalDuration: getTotalDuration(),
+  clearSessions, // ✅ sekarang valid
+}}>
+
       {children}
       {/* GLOBAL AUDIO ELEMENT (Hidden but always active) */}
       <audio ref={audioRef} src={MUSIC_TRACKS[trackIndex].url} loop crossOrigin="anonymous"/>

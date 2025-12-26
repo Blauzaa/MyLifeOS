@@ -1,8 +1,14 @@
 'use client'
-import { useEffect, useState, useCallback, useRef } from 'react' // Tambah useRef
+import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '../../utils/supabase/client'
-import { Plus, Trash2, Save, Image as ImageIcon, Loader2, Cloud } from 'lucide-react'
+import { 
+  Plus, Trash2, Image as ImageIcon, Loader2, Cloud, 
+  Search, FileText, MoreVertical, Layout, X
+} from 'lucide-react'
 import imageCompression from 'browser-image-compression'
+
+// Import Global Modal
+import { useModal } from '../../context/ModalContext'
 
 // --- TIPTAP IMPORTS ---
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -15,20 +21,24 @@ interface Note {
   id: string
   title: string
   content: string
+  cover_url?: string // New: Cover image via URL
   created_at: string
 }
 
 export default function NotesPage() {
   const [notes, setNotes] = useState<Note[]>([])
   const [selectedNote, setSelectedNote] = useState<Note | null>(null)
+  const { showModal } = useModal() // Panggil Modal Global
   
   const [loading, setLoading] = useState(true)
   const [isUploading, setIsUploading] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
   
   const [editTitle, setEditTitle] = useState('')
+  const [searchTerm, setSearchTerm] = useState('') // New: Search
+  const [coverUrlInput, setCoverUrlInput] = useState('') 
+  const [showCoverInput, setShowCoverInput] = useState(false)
   
-  // STATE BARU: Untuk memancing auto-save setiap ada perubahan sekecil apapun
   const [lastChange, setLastChange] = useState<number>(Date.now())
 
   // --- SETUP EDITOR TIPTAP ---
@@ -39,16 +49,15 @@ export default function NotesPage() {
         inline: true,
         allowBase64: true,
         HTMLAttributes: {
-          class: 'rounded-xl max-w-full my-4 border border-white/10 shadow-lg',
+          class: 'rounded-xl max-w-full my-6 border border-white/10 shadow-2xl transition-transform hover:scale-[1.01]',
         },
       }),
     ],
     editorProps: {
       attributes: {
-        class: 'prose prose-invert max-w-none focus:outline-none min-h-[300px]',
+        class: 'prose prose-invert prose-lg max-w-none focus:outline-none min-h-[50vh] text-slate-300 leading-relaxed',
       },
     },
-    // INI KUNCINYA: Setiap ada update (ketik/hapus gambar), kita update timestamp
     onUpdate: () => {
       setSaveStatus('unsaved') 
       setLastChange(Date.now()) 
@@ -64,18 +73,18 @@ export default function NotesPage() {
 
   useEffect(() => { fetchNotes() }, [fetchNotes])
 
-  // Sync Editor Content saat Note dipilih
+  // Sync Editor Content
   useEffect(() => {
     if (editor && selectedNote) {
-      // Cek agar tidak reset kursor saat auto-save (hanya set content jika beda jauh/awal load)
       const currentHTML = editor.getHTML()
-      if (currentHTML !== selectedNote.content) {
+      // Hanya set content jika berbeda signifikan untuk mencegah cursor jump
+      if (currentHTML !== selectedNote.content && !editor.isFocused) {
         editor.commands.setContent(selectedNote.content || '')
       }
     }
-  }, [selectedNote, editor]) // Hapus dependency lain agar tidak loop
+  }, [selectedNote, editor])
 
-  // 2. FUNGSI UPLOAD (Sama seperti sebelumnya)
+  // 2. FUNGSI UPLOAD (Cloudinary)
   const processAndUploadImage = async (file: File) => {
     if (!file.type.startsWith('image/')) return null
     try {
@@ -93,22 +102,27 @@ export default function NotesPage() {
       formData.append('upload_preset', uploadPreset) 
       
       const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
-        method: 'POST',
-        body: formData
+        method: 'POST', body: formData
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error?.message)
       return result.secure_url 
     } catch (err) {
       console.error(err)
-      alert("Gagal upload gambar")
+      // Gunakan Modal untuk error
+      showModal({
+        title: 'Upload Failed', message: 'Could not upload image.', type: 'danger',
+        onConfirm: function (): Promise<void> | void {
+          throw new Error('Function not implemented.')
+        }
+      })
       return null
     } finally {
       setIsUploading(false)
     }
   }
 
-  // 3. FUNGSI HAPUS GAMBAR (Sama seperti sebelumnya)
+  // 3. FUNGSI HAPUS GAMBAR (Cloudinary Cleanup)
   const deleteImagesFromCloudinary = async (htmlContent: string) => {
     const regex = /res\.cloudinary\.com\/[^/]+\/image\/upload\/v\d+\/([^/.]+)/g;
     let match;
@@ -128,6 +142,7 @@ export default function NotesPage() {
   }
 
   // 4. SAVE LOGIC
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const saveToDb = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user || !editor) return
@@ -137,18 +152,21 @@ export default function NotesPage() {
 
     try {
       if (selectedNote) {
+        // Update existing
         await supabase.from('notes').update({ 
           title: editTitle, 
           content: contentHtml, 
+          cover_url: coverUrlInput,
           updated_at: new Date() 
         }).eq('id', selectedNote.id)
 
-        // Update list lokal tanpa fetch ulang
-        setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, title: editTitle, content: contentHtml } : n))
+        setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, title: editTitle, content: contentHtml, cover_url: coverUrlInput } : n))
       } else {
+        // Create new
         const { data } = await supabase.from('notes').insert({
           title: editTitle || 'Untitled Note',
           content: contentHtml,
+          cover_url: coverUrlInput,
           user_id: user.id
         }).select().single()
 
@@ -164,22 +182,12 @@ export default function NotesPage() {
     }
   }
 
-  // 5. AUTO SAVE (DIPERBAIKI)
+  // 5. AUTO SAVE TRIGGER
   useEffect(() => {
-    // Jangan save jika tidak ada note aktif atau editor kosong saat awal
     if (!selectedNote && !editTitle && editor?.isEmpty) return 
-
-    // Debounce timer
-    const timer = setTimeout(() => {
-      saveToDb()
-    }, 1500) 
-
+    const timer = setTimeout(() => { saveToDb() }, 1500) 
     return () => clearTimeout(timer)
-    
-  // PERUBAHAN PENTING:
-  // Kita memantau 'lastChange' (angka waktu) dan 'editTitle'.
-  // 'lastChange' akan berubah SETIAP KALI ada update di editor (termasuk hapus gambar).
-  }, [lastChange, editTitle]) 
+  }, [lastChange, editTitle, coverUrlInput, saveToDb]) 
 
 
   // 6. EVENT HANDLERS
@@ -192,9 +200,7 @@ export default function NotesPage() {
         const file = items[i].getAsFile()
         if (file) {
           const url = await processAndUploadImage(file)
-          if (url && editor) {
-            editor.chain().focus().setImage({ src: url }).run()
-          }
+          if (url && editor) editor.chain().focus().setImage({ src: url }).run()
         }
       }
     }
@@ -211,93 +217,189 @@ export default function NotesPage() {
     const file = e.target.files?.[0]
     if (file && editor) {
       const url = await processAndUploadImage(file)
-      if (url) {
-        editor.chain().focus().setImage({ src: url }).run()
-      }
+      if (url) editor.chain().focus().setImage({ src: url }).run()
     }
   }
 
   const createNewNote = () => {
     setSelectedNote(null)
     setEditTitle('')
+    setCoverUrlInput('')
     editor?.commands.clearContent()
     setSaveStatus('saved')
+    // Focus title logic via timeout
     setTimeout(() => document.getElementById('note-title')?.focus(), 100)
   }
 
   const selectNote = (note: Note) => {
     setSelectedNote(note)
     setEditTitle(note.title)
+    setCoverUrlInput(note.cover_url || '')
     setSaveStatus('saved')
+    setShowCoverInput(false)
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Hapus catatan ini?")) return
-    const noteToDelete = notes.find(n => n.id === id)
-    if (noteToDelete?.content) {
-      await deleteImagesFromCloudinary(noteToDelete.content)
-    }
-    await supabase.from('notes').delete().eq('id', id)
-    if (selectedNote?.id === id) createNewNote()
-    setNotes(prev => prev.filter(n => n.id !== id))
+  // REQ #8: CUSTOM MODAL DELETE
+  const handleDelete = (id: string) => {
+    showModal({
+        title: 'Delete Note?',
+        message: 'This note and all images inside it will be permanently deleted.',
+        type: 'danger',
+        confirmText: 'Delete Forever',
+        onConfirm: async () => {
+            const noteToDelete = notes.find(n => n.id === id)
+            if (noteToDelete?.content) {
+              await deleteImagesFromCloudinary(noteToDelete.content)
+            }
+            await supabase.from('notes').delete().eq('id', id)
+            if (selectedNote?.id === id) createNewNote()
+            setNotes(prev => prev.filter(n => n.id !== id))
+        }
+    })
   }
+
+  const filteredNotes = notes.filter(n => n.title.toLowerCase().includes(searchTerm.toLowerCase()))
 
   return (
-    <div className="flex flex-col md:flex-row h-[calc(100vh-120px)] gap-6">
+    <div className="flex flex-col md:flex-row h-[calc(100vh-100px)] gap-6 animate-in fade-in duration-500">
       
-      {/* SIDEBAR */}
-      <div className="w-full md:w-80 flex flex-col gap-4">
-        <button onClick={createNewNote} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transition shadow-lg shadow-blue-900/20">
-          <Plus size={20}/> New Note
-        </button>
-        <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-          {loading ? <Loader2 className="animate-spin mx-auto mt-10 opacity-20"/> : 
-            notes.map(note => (
-              <div key={note.id} onClick={() => selectNote(note)} className={`p-4 rounded-2xl border cursor-pointer transition-all ${selectedNote?.id === note.id ? 'bg-blue-600 border-blue-500 text-white shadow-lg' : 'bg-slate-800/40 border-white/5 hover:bg-white/5 text-slate-400 hover:text-slate-200'}`}>
-                <h3 className="font-bold truncate text-sm">{note.title || 'Untitled'}</h3>
-                <div className="flex justify-between items-center mt-1">
-                  <p className="text-[10px] opacity-60">{new Date(note.created_at).toLocaleDateString()}</p>
+      {/* --- SIDEBAR --- */}
+      <div className="w-full md:w-80 flex flex-col gap-4 flex-shrink-0">
+        
+        {/* Header Sidebar */}
+        <div className="flex gap-2">
+            <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16}/>
+                <input 
+                    placeholder="Search notes..." 
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white focus:border-blue-500 outline-none transition"
+                />
+            </div>
+            <button onClick={createNewNote} className="bg-blue-600 hover:bg-blue-500 text-white p-2.5 rounded-xl transition shadow-lg hover:shadow-blue-500/20 active:scale-95">
+                <Plus size={20}/>
+            </button>
+        </div>
+
+        {/* List Notes */}
+        <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+          {loading ? (
+             <div className="flex flex-col items-center justify-center pt-20 opacity-50 space-y-2">
+                 <Loader2 className="animate-spin" />
+                 <span className="text-xs">Loading notes...</span>
+             </div>
+          ) : filteredNotes.length === 0 ? (
+             <div className="text-center text-slate-500 pt-10 text-sm">No notes found.</div>
+          ) : (
+            filteredNotes.map((note, idx) => (
+              <div key={note.id} onClick={() => selectNote(note)} 
+                className={`p-4 rounded-xl border cursor-pointer transition-all duration-200 animate-in slide-in-from-left-4
+                    ${selectedNote?.id === note.id 
+                        ? 'bg-gradient-to-br from-blue-600 to-blue-700 border-blue-500 text-white shadow-xl translate-x-1' 
+                        : 'bg-slate-900/40 border-white/5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 hover:border-white/10'
+                    }`}
+                style={{ animationDelay: `${idx * 50}ms` }}
+              >
+                <h3 className={`font-bold truncate text-sm mb-1 ${!note.title && 'italic opacity-50'}`}>{note.title || 'Untitled'}</h3>
+                <div className="flex justify-between items-center text-[10px] opacity-70">
+                    <span className="flex items-center gap-1"><FileText size={10}/> {new Date(note.created_at).toLocaleDateString()}</span>
+                    {note.cover_url && <ImageIcon size={10}/>}
                 </div>
               </div>
             ))
-          }
+          )}
         </div>
       </div>
 
-      {/* EDITOR */}
-      <div className="flex-1 bg-slate-900 border border-white/5 rounded-3xl flex flex-col overflow-hidden shadow-2xl relative">
-        <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
-          <div className="flex gap-2 items-center">
-            <div className="flex items-center gap-2 mr-4 px-3 py-1 rounded-full bg-black/20 border border-white/5">
-              {saveStatus === 'saving' && <Loader2 size={14} className="animate-spin text-blue-400"/>}
-              {saveStatus === 'saved' && <Cloud size={14} className="text-emerald-400"/>}
-              {saveStatus === 'unsaved' && <div className="w-3 h-3 rounded-full bg-amber-500"/>}
-              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500">
-                {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'unsaved' ? 'Unsaved' : 'Saved'}
-              </span>
+      {/* --- MAIN EDITOR --- */}
+      <div className="flex-1 bg-slate-900/50 backdrop-blur-md border border-white/10 rounded-3xl flex flex-col overflow-hidden shadow-2xl relative animate-in zoom-in-95 duration-300">
+        
+        {/* Cover Image Area */}
+        {coverUrlInput && (
+            <div className="relative h-48 w-full group overflow-hidden bg-slate-800">
+                 {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={coverUrlInput} alt="Cover" className="w-full h-full object-cover opacity-80 group-hover:scale-105 transition-transform duration-700"/>
+                <button onClick={() => setCoverUrlInput('')} className="absolute top-2 right-2 bg-black/50 p-1.5 rounded-full text-white opacity-0 group-hover:opacity-100 transition hover:bg-red-500">
+                    <Trash2 size={14}/>
+                </button>
             </div>
-            <label className="cursor-pointer p-2 hover:bg-white/10 rounded-lg text-slate-400 transition" title="Upload Image">
-              {isUploading ? <Loader2 className="animate-spin" size={20}/> : <ImageIcon size={20}/>}
+        )}
+
+        {/* Toolbar */}
+        <div className="px-6 py-4 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
+          <div className="flex gap-3 items-center">
+            
+            {/* Status Indicator */}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold tracking-wide transition-all
+                ${saveStatus === 'saving' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 
+                  saveStatus === 'unsaved' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
+                  'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
+              {saveStatus === 'saving' ? <Loader2 size={12} className="animate-spin"/> : <Cloud size={12}/>}
+              {saveStatus === 'saving' ? 'SAVING...' : saveStatus === 'unsaved' ? 'UNSAVED' : 'SAVED'}
+            </div>
+
+            <div className="h-6 w-px bg-white/10 mx-1"></div>
+
+            {/* Actions */}
+            <button onClick={() => setShowCoverInput(!showCoverInput)} 
+                className={`p-2 rounded-lg transition ${showCoverInput ? 'bg-blue-500/20 text-blue-400' : 'hover:bg-white/10 text-slate-400'}`} title="Add Cover URL">
+                <Layout size={18}/>
+            </button>
+            
+            <label className="cursor-pointer p-2 hover:bg-white/10 rounded-lg text-slate-400 transition" title="Insert Image in Text">
+              {isUploading ? <Loader2 className="animate-spin" size={18}/> : <ImageIcon size={18}/>}
               <input type="file" hidden accept="image/*" onChange={handleManualUpload} disabled={isUploading}/>
             </label>
           </div>
+
           {selectedNote && (
-            <button onClick={() => handleDelete(selectedNote.id)} className="p-2 hover:bg-red-500/10 text-slate-600 hover:text-red-500 rounded-lg transition">
-              <Trash2 size={20}/>
+            <button onClick={() => handleDelete(selectedNote.id)} className="p-2 hover:bg-red-500/10 text-slate-500 hover:text-red-500 rounded-lg transition" title="Delete Note">
+              <Trash2 size={18}/>
             </button>
           )}
         </div>
 
-        <input 
-          id="note-title"
-          className="w-full bg-transparent px-8 pt-6 pb-2 text-3xl font-bold outline-none text-slate-100 placeholder:text-slate-600"
-          placeholder="Judul Catatan..."
-          value={editTitle}
-          onChange={e => setEditTitle(e.target.value)}
-        />
-        <div className="flex-1 overflow-y-auto px-8 py-4 custom-scrollbar cursor-text" onClick={() => editor?.chain().focus().run()}>
-           <EditorContent editor={editor} />
+        {/* Input Cover URL (Collapsible) */}
+        {showCoverInput && (
+            <div className="px-6 py-3 bg-slate-900 border-b border-white/5 animate-in slide-in-from-top-2 flex gap-2">
+                <input 
+                    placeholder="Paste image URL for header cover (https://...)" 
+                    className="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-1.5 text-sm outline-none text-white focus:border-blue-500"
+                    value={coverUrlInput}
+                    onChange={(e) => {
+                        setCoverUrlInput(e.target.value)
+                        setSaveStatus('unsaved') // Trigger auto save
+                        setLastChange(Date.now())
+                    }}
+                />
+                <button onClick={() => setShowCoverInput(false)} className="p-1.5 hover:bg-white/10 rounded"><X size={16}/></button>
+            </div>
+        )}
+
+        {/* Editor Area */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar cursor-text bg-slate-900/30" onClick={() => editor?.chain().focus().run()}>
+           <div className="max-w-3xl mx-auto px-8 py-10 min-h-full">
+                <input 
+                    id="note-title"
+                    className="w-full bg-transparent text-4xl font-bold outline-none text-slate-100 placeholder:text-slate-600 mb-6 border-none p-0 focus:ring-0"
+                    placeholder="Untitled Note"
+                    value={editTitle}
+                    onChange={e => setEditTitle(e.target.value)}
+                />
+                <EditorContent editor={editor} className="min-h-[300px]" />
+           </div>
         </div>
+
+        {!selectedNote && !editTitle && editor?.isEmpty && (
+             <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-600 pointer-events-none bg-slate-900/50 backdrop-blur-sm z-10">
+                 <div className="bg-slate-900 p-6 rounded-2xl border border-white/5 shadow-2xl flex flex-col items-center">
+                    <FileText size={48} className="mb-4 opacity-50"/>
+                    <p className="text-lg font-medium text-slate-400">Select a note or create a new one</p>
+                    <p className="text-sm opacity-50 mt-1">Your ideas are safe here.</p>
+                 </div>
+             </div>
+        )}
       </div>
     </div>
   )
