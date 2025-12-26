@@ -34,6 +34,9 @@ export default function AIChat() {
     })
   }
 
+  // Ref to track processed tool calls to prevent double-execution
+  const processedTools = useRef<Set<string>>(new Set());
+
   // --- HANDLE TOOL ACTIONS ---
   useEffect(() => {
     if (!messages.length) return;
@@ -41,7 +44,14 @@ export default function AIChat() {
     if (lastMessage.role !== 'assistant' || !lastMessage.toolInvocations) return;
 
     lastMessage.toolInvocations.forEach(tool => {
-      if (!('result' in tool)) return; // Wait for result
+      // Create a unique ID for this specific result execution
+      const uniqueId = `${tool.toolCallId}-${tool.state}`;
+
+      // Only proceed if result is available AND we haven't processed this exact state yet
+      if (!('result' in tool) || processedTools.current.has(uniqueId)) return;
+
+      // Mark as processed immediately
+      processedTools.current.add(uniqueId);
 
       // 1. TRIGGER ACTION (Navigation)
       if (tool.toolName === 'triggerAction') {
@@ -59,7 +69,8 @@ export default function AIChat() {
         try {
           const data = JSON.parse(tool.result as string);
           if (data.action === 'start_focus_session') {
-            setConfig(prev => ({ ...prev, ...data.config }));
+            console.log("Setting Focus Config:", data.config); // Debug log
+            setConfig((prev: any) => ({ ...prev, ...data.config }));
             setTaskName(data.taskName);
             switchMode('focus');
             setIsActive(true); // Auto start
