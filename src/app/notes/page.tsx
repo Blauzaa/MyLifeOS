@@ -179,10 +179,10 @@ export default function NotesPage() {
   const saveToDb = useCallback(async () => {
     if (isDeletingRef.current) return // BLOCK SAVE IF DELETING
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user || !editor) return
+    if (!user) return
 
     setSaveStatus('saving')
-    const contentHtml = editor.getHTML()
+    const contentHtml = editor?.getHTML() || ''
 
     // Payload sanitization
     const payload = {
@@ -200,7 +200,7 @@ export default function NotesPage() {
 
         setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, ...payload, cover_url: payload.cover_url || undefined } : n))
       } else {
-        // Create new (Fallback logic if selectedNote null but we want to save? usually createNewNote handles this first)
+        // Create new
         const { data, error } = await supabase.from('notes').insert({
           ...payload,
           user_id: user.id
@@ -216,9 +216,18 @@ export default function NotesPage() {
     } catch (error: any) {
       console.error("Save Error:", error)
       setSaveStatus('unsaved')
-      // Suppress alert for background saves, only log
     }
   }, [editTitle, editor, coverUrlInput, selectedNote])
+
+  // --- AUTO SAVE EFFECT ---
+  useEffect(() => {
+    if (saveStatus === 'unsaved') {
+      const timeoutId = setTimeout(() => {
+        saveToDb()
+      }, 2000) // Auto save after 2 seconds
+      return () => clearTimeout(timeoutId)
+    }
+  }, [saveStatus, saveToDb])
 
   // ...
 
@@ -327,13 +336,17 @@ export default function NotesPage() {
           <div className="flex gap-3 items-center">
 
             {/* Status Indicator */}
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold tracking-wide transition-all
-                ${saveStatus === 'saving' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                saveStatus === 'unsaved' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                  'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
+            {/* Status Indicator */}
+            <button
+              onClick={() => saveStatus === 'unsaved' && saveToDb()}
+              disabled={saveStatus !== 'unsaved'}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold tracking-wide transition-all
+                ${saveStatus === 'saving' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20 cursor-wait' :
+                  saveStatus === 'unsaved' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20 cursor-pointer' :
+                    'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 cursor-default'}`}>
               {saveStatus === 'saving' ? <Loader2 size={12} className="animate-spin" /> : <Cloud size={12} />}
-              {saveStatus === 'saving' ? 'SAVING...' : saveStatus === 'unsaved' ? 'UNSAVED' : 'SAVED'}
-            </div>
+              {saveStatus === 'saving' ? 'SAVING...' : saveStatus === 'unsaved' ? 'UNSAVED (CLICK TO SAVE)' : 'SAVED'}
+            </button>
 
             <div className="h-6 w-px bg-white/10 mx-1"></div>
 
@@ -381,7 +394,11 @@ export default function NotesPage() {
               className="w-full bg-transparent text-4xl font-bold outline-none text-slate-100 placeholder:text-slate-600 mb-6 border-none p-0 focus:ring-0"
               placeholder="Untitled Note"
               value={editTitle}
-              onChange={e => setEditTitle(e.target.value)}
+              onChange={e => {
+                setEditTitle(e.target.value)
+                setSaveStatus('unsaved')
+                setLastChange(Date.now())
+              }}
               onClick={(e) => e.stopPropagation()}
             />
             <EditorContent editor={editor} className="min-h-[300px]" />
