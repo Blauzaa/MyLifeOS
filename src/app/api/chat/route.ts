@@ -118,15 +118,25 @@ export async function POST(req: Request) {
           parameters: z.object({
             title: z.string(),
             url: z.string().describe('URL link').optional(),
+            code: z.string().describe('Code snippet content').optional(),
             type: z.enum(['link', 'snippet']).default('link')
           }),
-          execute: async ({ title, url, type }) => {
+          execute: async ({ title, url, code, type }) => {
             if (!user) return 'Error: Login required.';
-            if (type === 'link' && url) {
+
+            if (type === 'link') {
+              if (!url) return 'Error: URL is required for links.';
               const { error } = await supabase.from('dynamic_items').insert({ title, url, type: 'link', user_id: user.id });
               return error ? `Error: ${error.message}` : `🔗 Link Saved: "${title}"`;
             }
-            return 'Error: Snippets not fully supported via chat yet.';
+
+            if (type === 'snippet') {
+              if (!code) return 'Error: Code content is required for snippets.';
+              const { error } = await supabase.from('snippets').insert({ title, code, user_id: user.id });
+              return error ? `Error: ${error.message}` : `💻 Snippet Saved: "${title}"`;
+            }
+
+            return 'Error: Invalid resource type.';
           }
         }),
         triggerAction: tool({
