@@ -1,10 +1,11 @@
 import { groq } from '@ai-sdk/groq';
 import { streamText, tool } from 'ai';
 import { z } from 'zod';
-import { adminDb, adminAuth } from '../../../utils/firebase/admin';
+import { getAdminDb, getAdminAuth } from '../../../utils/firebase/admin'; // ✅ DIUBAH: Menggunakan getter dinamis
 import admin from 'firebase-admin';
 
 export const maxDuration = 30;
+export const dynamic = 'force-dynamic'; // ✅ DITAMBAHKAN: Memaksa rute agar selalu dinamis saat runtime
 
 export async function POST(req: Request) {
   try {
@@ -17,7 +18,7 @@ export async function POST(req: Request) {
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
       try {
-        const decodedToken = await adminAuth.verifyIdToken(token);
+        const decodedToken = await getAdminAuth().verifyIdToken(token); // ✅ DIUBAH: Menggunakan getAdminAuth()
         userId = decodedToken.uid;
         user = decodedToken;
       } catch (error) {
@@ -65,7 +66,7 @@ export async function POST(req: Request) {
           execute: async ({ title, status, priority }) => {
             if (!user) return 'Error: Login required.';
             try {
-              await adminDb.collection('tasks').add({
+              await getAdminDb().collection('tasks').add({ // ✅ DIUBAH: getAdminDb()
                 title,
                 status,
                 priority,
@@ -89,7 +90,7 @@ export async function POST(req: Request) {
           execute: async ({ title, amount, type }) => {
             if (!user) return 'Error: Login required.';
             try {
-              await adminDb.collection('finances').add({
+              await getAdminDb().collection('finances').add({ // ✅ DIUBAH: getAdminDb()
                 title,
                 amount: Number(amount),
                 type,
@@ -111,7 +112,7 @@ export async function POST(req: Request) {
           execute: async ({ title, content }) => {
             if (!user) return 'Error: Login required.';
             try {
-              await adminDb.collection('notes').add({
+              await getAdminDb().collection('notes').add({ // ✅ DIUBAH: getAdminDb()
                 title,
                 content,
                 user_id: userId,
@@ -134,7 +135,7 @@ export async function POST(req: Request) {
           execute: async ({ title, event_date, start_time, end_time }) => {
             if (!user) return 'Error: Login required.';
             try {
-              await adminDb.collection('events').add({
+              await getAdminDb().collection('events').add({ // ✅ DIUBAH: getAdminDb()
                 title,
                 event_date,
                 start_time,
@@ -160,13 +161,13 @@ export async function POST(req: Request) {
           execute: async ({ title, type, status, link, synopsis }) => {
             if (!user) return 'Error: Login required.';
             try {
-              const querySnapshot = await adminDb.collection('watchlist')
+              const querySnapshot = await getAdminDb().collection('watchlist') // ✅ DIUBAH: getAdminDb()
                 .where('user_id', '==', userId)
                 .where('status', '==', status)
                 .get();
               const newPos = querySnapshot.size;
 
-              await adminDb.collection('watchlist').add({
+              await getAdminDb().collection('watchlist').add({ // ✅ DIUBAH: getAdminDb()
                 title,
                 type,
                 status,
@@ -195,7 +196,7 @@ export async function POST(req: Request) {
             try {
               if (type === 'link') {
                 if (!url) return 'Error: URL is required for links.';
-                await adminDb.collection('dynamic_items').add({
+                await getAdminDb().collection('dynamic_items').add({ // ✅ DIUBAH: getAdminDb()
                   title,
                   url,
                   type: 'link',
@@ -207,7 +208,7 @@ export async function POST(req: Request) {
 
               if (type === 'snippet') {
                 if (!code) return 'Error: Code content is required for snippets.';
-                await adminDb.collection('snippets').add({
+                await getAdminDb().collection('snippets').add({ // ✅ DIUBAH: getAdminDb()
                   title,
                   code,
                   user_id: userId,
