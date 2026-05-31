@@ -3,13 +3,14 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '../utils/supabase/client'
 import {
     Wallet, Link as LinkIcon,
     Calendar, Clock, Zap, Plus, ArrowRight,
     Sun, Moon, CloudSun, CheckCircle2, Loader2, X
 } from 'lucide-react'
-import { User } from '@supabase/supabase-js'
+import { collection, query, where, getDocs, addDoc, limit, orderBy } from 'firebase/firestore'
+import { onAuthStateChanged, User } from 'firebase/auth'
+import { db, auth } from '../utils/firebase/client'
 
 // --- INTERFACES ---
 interface TodayEvent {
@@ -76,7 +77,6 @@ const QUOTES = [
 ]
 
 export default function DashboardOverview() {
-    const supabase = createClient()
     const router = useRouter()
 
     // State Data
@@ -110,90 +110,108 @@ export default function DashboardOverview() {
         setTimeout(() => setToast({ show: false, message: '' }), 3000)
     }
 
-    const fetchData = async () => {
+    const fetchData = async (currentUser: User) => {
         try {
-            const { data: { user } } = await supabase.auth.getUser()
-            setUser(user)
-            if (user) {
-                // Parallel Fetching
-                const [tasks, links, financeData, events] = await Promise.all([
-                    // Hitung Task
-                    supabase.from('tasks').select('*', { count: 'exact', head: true }).eq('status', 'todo'),
+            const tasksQuery = query(collection(db, 'tasks'), where('user_id', '==', currentUser.uid), where('status', '==', 'todo'));
+            const linksQuery = query(collection(db, 'dynamic_items'), where('user_id', '==', currentUser.uid), where('type', '==', 'link'));
+            const financesQuery = query(collection(db, 'finances'), where('user_id', '==', currentUser.uid));
+            const eventsQuery = query(
+                collection(db, 'events'),
+                where('user_id', '==', currentUser.uid),
+                where('event_date', '==', todayISODate),
+                orderBy('start_time', 'asc'),
+                limit(4)
+            );
 
-                    // Hitung Links
-                    supabase.from('dynamic_items').select('*', { count: 'exact', head: true }).eq('type', 'link'),
+            const [tasksSnap, linksSnap, financesSnap, eventsSnap] = await Promise.all([
+                getDocs(tasksQuery),
+                getDocs(linksQuery),
+                getDocs(financesQuery),
+                getDocs(eventsQuery)
+            ]);
 
-                    // PERBAIKAN DI SINI: Menggunakan tabel 'finances', bukan 'transactions'
-                    supabase.from('finances').select('amount, type'),
-
-                    // Ambil Event Hari Ini
-                    supabase.from('events').select('id, title, start_time, end_time')
-                        .eq('user_id', user.id).eq('event_date', todayISODate)
-                        .order('start_time', { ascending: true }).limit(4)
-                ])
-
-                // Kalkulasi Saldo (Income - Expense)
-                let bal = 0;
-                if (financeData.data) {
-                    financeData.data.forEach((t: { amount: number, type: string }) => {
-                        // Pastikan tipe data number agar kalkulasi benar
-                        const amount = Number(t.amount)
-                        if (t.type === 'income') {
-                            bal += amount
-                        } else {
-                            bal -= amount
-                        }
-                    })
+            let bal = 0;
+            financesSnap.docs.forEach(doc => {
+                const data = doc.data();
+                const amount = Number(data.amount || 0);
+                if (data.type === 'income') {
+                    bal += amount;
+                } else {
+                    bal -= amount;
                 }
+            });
 
-                setStats({
-                    tasks: tasks.count || 0,
-                    links: links.count || 0,
-                    balance: bal
-                })
+            setStats({
+                tasks: tasksSnap.size,
+                links: linksSnap.size,
+                balance: bal
+            });
 
-                if (events.data) setTodayEvents(events.data as TodayEvent[])
-            }
+            const eventsList = eventsSnap.docs.map(doc => ({
+                id: doc.id,
+                title: doc.data().title || '',
+                start_time: doc.data().start_time || '',
+                end_time: doc.data().end_time || '',
+            }));
+
+            setTodayEvents(eventsList);
         } catch (error) {
-            console.error("Dashboard Fetch Error:", error)
-            // Optional: showToast('Failed to load dashboard data')
+            console.error("Dashboard Fetch Error:", error);
         } finally {
-            setLoading(false)
+            setLoading(false);
         }
     }
 
     useEffect(() => {
         setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)])
         determineGreeting()
-        fetchData()
+        
+        const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+            setUser(firebaseUser)
+            if (firebaseUser) {
+                fetchData(firebaseUser)
+            } else {
+                setLoading(false)
+            }
+        })
+        return () => unsubscribe()
     }, [])
 
     // --- HANDLERS FOR QUICK ACTIONS ---
     const handleQuickAdd = async () => {
         if (!modalInput.title) return
         setIsSubmitting(true)
-        const { data: { user } } = await supabase.auth.getUser()
+        const currentUser = auth.currentUser
 
-        if (user) {
-            if (modalType === 'task') {
-                await supabase.from('tasks').insert({
-                    title: modalInput.title,
-                    status: 'todo',
-                    priority: 'medium',
-                    user_id: user.id
-                })
-                showToast('Task added successfully!')
-                setStats(prev => ({ ...prev, tasks: prev.tasks + 1 }))
+        if (currentUser) {
+            try {
+                if (modalType === 'task') {
+                    await addDoc(collection(db, 'tasks'), {
+                        title: modalInput.title,
+                        status: 'todo',
+                        priority: 'medium',
+                        user_id: currentUser.uid,
+                        subtasks: [],
+                        created_at: new Date().toISOString()
+                    })
+                    showToast('Task added successfully!')
+                    setStats(prev => ({ ...prev, tasks: prev.tasks + 1 }))
 
-            } else if (modalType === 'link') {
-                await supabase.from('dynamic_items').insert({
-                    title: modalInput.title,
-                    content: modalInput.value,
-                    type: 'link',
-                    user_id: user.id
-                })
-                showToast('Link saved successfully!')
-                setStats(prev => ({ ...prev, links: prev.links + 1 }))
+                } else if (modalType === 'link') {
+                    await addDoc(collection(db, 'dynamic_items'), {
+                        title: modalInput.title,
+                        url: modalInput.value,
+                        content: modalInput.value,
+                        type: 'link',
+                        user_id: currentUser.uid,
+                        created_at: new Date().toISOString()
+                    })
+                    showToast('Link saved successfully!')
+                    setStats(prev => ({ ...prev, links: prev.links + 1 }))
+                }
+            } catch (error) {
+                console.error("Error doing quick add:", error)
+                showToast('Failed to save item')
             }
         }
         setIsSubmitting(false)
@@ -253,9 +271,9 @@ export default function DashboardOverview() {
                 <div className="relative z-10 flex flex-col md:flex-row justify-between md:items-center gap-6">
                     <div className="flex items-center gap-5">
                         <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-md border border-white/20 overflow-hidden shadow-inner flex items-center justify-center">
-                            {user?.user_metadata?.avatar_url ? (
+                            {user?.photoURL ? (
                                 // eslint-disable-next-line @next/next/no-img-element
-                                <img src={user.user_metadata.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                                <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" />
                             ) : (
                                 <span className="text-2xl font-bold">{user?.email?.[0].toUpperCase()}</span>
                             )}

@@ -23,6 +23,8 @@
     "browser-image-compression": "^2.0.2",
     "cloudinary": "^2.8.0",
     "clsx": "^2.1.1",
+    "firebase": "^12.14.0",
+    "firebase-admin": "^13.10.0",
     "framer-motion": "^12.23.26",
     "lucide-react": "^0.469.0",
     "next": "15.1.11",

@@ -18,11 +18,10 @@ import {
   User as UserIcon,
   MoreHorizontal
 } from 'lucide-react'
-import { createClient } from '../utils/supabase/client'
-import { User } from '@supabase/supabase-js'
+import { User, onAuthStateChanged, signOut } from 'firebase/auth'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useModal } from '../context/ModalContext' // Import Custom Modal
-
+import { auth, githubProvider, signInWithPopup } from '../utils/firebase/client';
 const menus = [
   { name: 'Overview', href: '/', icon: LayoutDashboard },
   { name: 'Tasks', href: '/tasks', icon: CheckSquare },
@@ -37,28 +36,18 @@ const menus = [
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const supabase = createClient()
   const { showModal } = useModal()
   
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      setUser(user)
-      setLoading(false)
-    }
-
-    getUser()
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser)
       setLoading(false)
     })
-
-    return () => subscription.unsubscribe()
-  }, [supabase])
+    return () => unsubscribe()
+  }, [])
 
   const isActive = (path: string) => pathname === path
 
@@ -69,20 +58,19 @@ export default function Sidebar() {
       type: 'danger',
       confirmText: 'Log Out',
       onConfirm: async () => {
-        await supabase.auth.signOut()
+        await signOut(auth)
         router.push('/')
       }
     })
   }
 
   const handleLogin = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'github',
-      options: {
-        redirectTo: `${location.origin}/auth/callback`,
-      },
-    })
-  }
+    try {
+      await signInWithPopup(auth, githubProvider);
+    } catch (error) {
+      console.error("Login gagal", error);
+    }
+  };
 
   // --- SKELETON LOADER ---
   if (loading) return (
@@ -175,7 +163,7 @@ export default function Sidebar() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-white truncate">
-                        {user.user_metadata?.full_name || 'User'}
+                        {user.displayName || 'User'}
                     </p>
                     <p className="text-[10px] text-slate-500 truncate">{user.email}</p>
                   </div>

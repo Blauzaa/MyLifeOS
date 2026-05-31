@@ -1,12 +1,26 @@
 'use client'
-import { useEffect, useState, useCallback, useRef } from 'react'
-import { createClient } from '../../utils/supabase/client'
+import { useEffect, useState, useCallback } from 'react'
 import {
   Plus, Trash2, CheckCircle, Clock, Loader2,
   Calendar, CheckSquare, X, AlertCircle, Image as ImageIcon,
-  Link as LinkIcon, UploadCloud
+  Link as LinkIcon
 } from 'lucide-react'
 import { useModal } from '../../context/ModalContext'
+import { db, auth } from '../../utils/firebase/client';
+import { onAuthStateChanged, User } from 'firebase/auth';
+// Tambahkan fungsi-fungsi Firestore yang dibutuhkan untuk CRUD
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  getDocs,
+  doc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  serverTimestamp
+} from 'firebase/firestore';
 
 // --- DND KIT IMPORTS ---
 import {
@@ -31,7 +45,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
-const supabase = createClient()
+// Supabase client removed.
 
 // --- CLOUDINARY CONFIG ---
 const CLOUDINARY_CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || '';
@@ -59,13 +73,13 @@ interface Task {
 }
 
 // ==========================================
-// 1. IMPROVED TASK EDIT MODAL (WITH PASTE & UPLOAD)
+// 1. IMPROVED TASK EDIT MODAL (WITH FIRESTORE ACTIONS)
 // ==========================================
 const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => void, onUpdate: () => void }) => {
   const [localTask, setLocalTask] = useState<Task>(task)
   const [subtaskInput, setSubtaskInput] = useState('')
   const [showUrlInput, setShowUrlInput] = useState(false)
-  const [isUploading, setIsUploading] = useState(false) // State loading upload
+  const [isUploading, setIsUploading] = useState(false)
 
   // Helper: Upload ke Cloudinary
   const uploadImage = async (file: File) => {
@@ -85,7 +99,6 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
       const data = await response.json();
       const imageUrl = data.secure_url;
 
-      // Update Local & Supabase
       updateTaskField({ cover_url: imageUrl });
       setShowUrlInput(false);
     } catch (error) {
@@ -99,18 +112,17 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
   // Event Listener untuk Paste (Ctrl+V)
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
-      // Hanya proses jika ada items
       if (!e.clipboardData?.items) return;
 
       const items = e.clipboardData.items;
       for (let i = 0; i < items.length; i++) {
         if (items[i].type.indexOf('image') !== -1) {
-          e.preventDefault(); // Mencegah paste default jika sedang di textarea
+          e.preventDefault();
           const file = items[i].getAsFile();
           if (file) {
             uploadImage(file);
           }
-          break; // Hanya ambil gambar pertama
+          break;
         }
       }
     };
@@ -129,41 +141,69 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  // Update Field di Firestore
   const updateTaskField = async (field: Partial<Task>) => {
     setLocalTask(prev => ({ ...prev, ...field }))
-    const { error } = await supabase.from('tasks').update(field).eq('id', task.id)
-    if (!error) onUpdate()
+    try {
+      const taskRef = doc(db, 'tasks', task.id);
+      await updateDoc(taskRef, field);
+      onUpdate();
+    } catch (error) {
+      console.error("Error updating task field in Firestore:", error);
+    }
   }
 
+  // Tambah Subtask ke array subtasks di dokumen Task
   const addSubtask = async () => {
     if (!subtaskInput) return
-    const { data, error } = await supabase.from('subtasks').insert({
-      task_id: task.id, title: subtaskInput
-    }).select().single()
 
-    if (!error && data) {
-      setSubtaskInput('')
-      setLocalTask(prev => ({ ...prev, subtasks: [...prev.subtasks, data] }))
-      onUpdate()
+    const newSubtask: Subtask = {
+      id: Math.random().toString(36).substring(2, 9), // ID acak sederhana
+      task_id: task.id,
+      title: subtaskInput,
+      is_completed: false
+    }
+
+    const updatedSubtasks = [...localTask.subtasks, newSubtask];
+
+    try {
+      const taskRef = doc(db, 'tasks', task.id);
+      await updateDoc(taskRef, { subtasks: updatedSubtasks });
+      setSubtaskInput('');
+      setLocalTask(prev => ({ ...prev, subtasks: updatedSubtasks }));
+      onUpdate();
+    } catch (error) {
+      console.error("Error adding subtask to Firestore:", error);
     }
   }
 
+  // Toggle status completed subtask
   const toggleSubtask = async (subId: string, currentStatus: boolean) => {
-    const { error } = await supabase.from('subtasks').update({ is_completed: !currentStatus }).eq('id', subId)
-    if (!error) {
-      setLocalTask(prev => ({
-        ...prev,
-        subtasks: prev.subtasks.map(s => s.id === subId ? { ...s, is_completed: !currentStatus } : s)
-      }))
-      onUpdate()
+    const updatedSubtasks = localTask.subtasks.map(s =>
+      s.id === subId ? { ...s, is_completed: !currentStatus } : s
+    );
+
+    try {
+      const taskRef = doc(db, 'tasks', task.id);
+      await updateDoc(taskRef, { subtasks: updatedSubtasks });
+      setLocalTask(prev => ({ ...prev, subtasks: updatedSubtasks }));
+      onUpdate();
+    } catch (error) {
+      console.error("Error toggling subtask in Firestore:", error);
     }
   }
 
+  // Hapus subtask dari array di dokumen Task
   const deleteSubtask = async (subId: string) => {
-    const { error } = await supabase.from('subtasks').delete().eq('id', subId)
-    if (!error) {
-      setLocalTask(prev => ({ ...prev, subtasks: prev.subtasks.filter(s => s.id !== subId) }))
-      onUpdate()
+    const updatedSubtasks = localTask.subtasks.filter(s => s.id !== subId);
+
+    try {
+      const taskRef = doc(db, 'tasks', task.id);
+      await updateDoc(taskRef, { subtasks: updatedSubtasks });
+      setLocalTask(prev => ({ ...prev, subtasks: updatedSubtasks }));
+      onUpdate();
+    } catch (error) {
+      console.error("Error deleting subtask from Firestore:", error);
     }
   }
 
@@ -173,7 +213,6 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
         className="relative bg-slate-900 border border-white/10 w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-
         <button
           onClick={onClose}
           className="absolute top-3 right-3 z-50 p-2 bg-black/50 hover:bg-red-500/80 text-white rounded-full transition-all backdrop-blur-md group shadow-lg border border-white/10"
@@ -314,39 +353,25 @@ const TaskModal = ({ task, onClose, onUpdate }: { task: Task, onClose: () => voi
                     if (newStatus === 'done' && localTask.subtasks.length > 0) {
                       const hasIncomplete = localTask.subtasks.some(s => !s.is_completed);
                       if (hasIncomplete) {
-                        // Prevent change & show warning via Alert for simplicity inside Modal (or use custom modal if possible, but standard alert is safer for now to avoid z-index hell)
-                        // Better: Use the same showModal from context if available in parent?
-                        // Since TaskModal is a child component, we might not have access to the exact same 'showModal' context instance if not passed or if context is global. 
-                        // Actually TaskModal uses `useModal`? No, `TasksPage` uses it. 
-                        // Let's pass a `checkSubtasks` prop or handle it inside `updateTaskField`.
-                        // For now, let's just use window.confirm or alert to block it, OR simply revert if not confirmed.
                         const confirmComplete = window.confirm(`"${localTask.title}" has incomplete subtasks. Mark all as done and complete task?`);
                         if (confirmComplete) {
-                          // Logic to mark all subtasks done
-                          // We need to call a function that updates subtasks AND status.
-                          // Since we are inside the modal, we can call a prop function or handle it here.
-                          // Let's defer to a prop `onForceComplete` if possible? 
-                          // But `TaskModal` only has `onUpdate`.
-                          // Let's try to do it here.
-                          // Call an async function to update all subtasks.
-                          updateTaskField({ status: 'done' }); // This just updates status. 
-                          // We need to update subtasks too. Since updateTaskField is simple, we might need a separate function.
-                          // Let's stick to the prompt requirement: "manual ubah status dia tanya".
-                          // Let's assume the user accepted.
                           const updateSubtasks = async () => {
-                            await supabase.from('subtasks').update({ is_completed: true }).eq('task_id', localTask.id);
-                            // Refetch? cancel?
-                            // We update local state too.
+                            const updatedSubtasks = localTask.subtasks.map(s => ({ ...s, is_completed: true }));
+                            const taskRef = doc(db, 'tasks', localTask.id);
+                            await updateDoc(taskRef, {
+                              status: 'done',
+                              subtasks: updatedSubtasks
+                            });
+
                             setLocalTask(prev => ({
                               ...prev,
                               status: 'done',
-                              subtasks: prev.subtasks.map(s => ({ ...s, is_completed: true }))
+                              subtasks: updatedSubtasks
                             }));
-                            updateTaskField({ status: 'done' });
+                            onUpdate();
                           };
                           updateSubtasks();
                         } else {
-                          // Cancel: do nothing, revert select value (react state won't change)
                           return;
                         }
                       } else {
@@ -490,7 +515,6 @@ const TaskColumn = ({ title, status, icon: Icon, color, tasks, onTaskClick, onDe
 // ==========================================
 // 4. MAIN PAGE
 // ==========================================
-
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [newTask, setNewTask] = useState('')
@@ -507,26 +531,82 @@ export default function TasksPage() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const fetchTasks = useCallback(async () => {
-    const { data } = await supabase.from('tasks').select(`*, subtasks (*)`).order('created_at', { ascending: false })
-    if (data) setTasks(data as Task[])
-    setLoading(false)
+  // FUNGSI FETCH TASKS YANG DIPERBAIKI (MENGGUNAKAN FIRESTORE)
+  const fetchTasks = useCallback(async (userArg?: User) => {
+    try {
+      const user = userArg || auth.currentUser
+      if (!user) {
+        setLoading(false)
+        return
+      }
+
+      const q = query(
+        collection(db, 'tasks'),
+        where('user_id', '==', user.uid),
+        orderBy('created_at', 'desc')
+      );
+
+      const querySnapshot = await getDocs(q);
+      const tasksList = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          title: data.title || '',
+          description: data.description || '',
+          status: data.status || 'todo',
+          priority: data.priority || 'medium',
+          deadline: data.deadline,
+          cover_url: data.cover_url,
+          // Konversi format Firebase ServerTimestamp ke format ISO string
+          created_at: data.created_at?.toDate ? data.created_at.toDate().toISOString() : new Date().toISOString(),
+          subtasks: data.subtasks || [] // data subtasks diambil langsung dari array
+        } as Task;
+      });
+
+      setTasks(tasksList)
+    } catch (error) {
+      console.error("Error fetching tasks from Firestore:", error);
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
-  useEffect(() => { fetchTasks() }, [fetchTasks])
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        fetchTasks(user)
+      } else {
+        setTasks([])
+        setLoading(false)
+      }
+    })
+    return () => unsubscribe()
+  }, [fetchTasks])
 
+  // Menambahkan Task Baru ke Firestore
   const addTask = async () => {
     if (!newTask) return
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
     if (!user) return
 
-    const { error } = await supabase.from('tasks').insert({
-      title: newTask, status: 'todo', user_id: user.id, priority: 'medium'
-    })
+    try {
+      await addDoc(collection(db, 'tasks'), {
+        title: newTask,
+        status: 'todo',
+        user_id: user.uid,
+        priority: 'medium',
+        subtasks: [], // Inisialisasi array subtask kosong
+        created_at: serverTimestamp() // Menggunakan server timestamp dari Firestore
+      });
 
-    if (!error) { setNewTask(''); fetchTasks() }
+      setNewTask('');
+      fetchTasks(user);
+    } catch (error) {
+      console.error("Error adding task to Firestore:", error);
+    }
   }
 
+  // Menghapus Task di Firestore
   const handleDeleteRequest = (id: string) => {
     showModal({
       title: 'Delete Task',
@@ -534,8 +614,12 @@ export default function TasksPage() {
       type: 'danger',
       confirmText: 'Yes, Delete',
       onConfirm: async () => {
-        await supabase.from('tasks').delete().eq('id', id);
-        setTasks(prev => prev.filter(t => t.id !== id));
+        try {
+          await deleteDoc(doc(db, 'tasks', id));
+          setTasks(prev => prev.filter(t => t.id !== id));
+        } catch (error) {
+          console.error("Error deleting document from Firestore:", error);
+        }
       }
     })
   }
@@ -581,15 +665,11 @@ export default function TasksPage() {
     const { active, over } = event;
     const activeId = active.id as string;
 
-    // Jangan clear activeId dulu di state agar drag overlay tidak hilang tiba-tiba jika kita mau revert visual
-    // Tapi karena kita pakai modal, kita harus clear status dragging
     setActiveId(null);
-
     if (!over) return;
 
     const overId = over.id as string;
 
-    // Helper to find target container status
     const findContainer = (id: string) => {
       if (['todo', 'doing', 'done'].includes(id)) return id;
       return tasks.find(t => t.id === id)?.status;
@@ -600,21 +680,13 @@ export default function TasksPage() {
 
     if (!item || !targetStatus) return;
 
-    // === LOGIKA BARU FORCE DONE ===
+    // Logika force done jika masih ada subtask yang tertunda
     if (targetStatus === 'done' && item.subtasks.length > 0) {
       const hasIncompleteSubtasks = item.subtasks.some(s => !s.is_completed);
 
       if (hasIncompleteSubtasks) {
-        // 1. REVERT: Balikin ke posisi awal di UI agar tidak "lompat" sebelum konfirmasi
-        // Kita paksa render ulang dari state 'tasks' yang belum berubah (karena optimistic update kita hanya update via setter, tapi jika kita tidak commit ke DB dan fetchTasks ulang, mungkin state local sudah kotor karena handleDragOver)
-        // Solusi: Kita fetch ulang saja atau revert manual.
-        // Tapi handleDragOver mengubah state 'tasks' secara real-time.
-        // Kita harus kembalikan item ke status aslinya.
-        // Status asli bisa diambil dari originalStatus yang kita simpan, atau simpelnya: reload data.
+        await fetchTasks(); // Reset visual render jika dibatalkan
 
-        await fetchTasks(); // Revert UI paling aman
-
-        // 2. TAMPILKAN MODAL KONFIRMASI
         showModal({
           title: 'Incomplete Subtasks',
           message: `"${item.title}" still has pending subtasks. Do you want to check them all as completed and move to Done?`,
@@ -629,28 +701,38 @@ export default function TasksPage() {
       }
     }
 
-    // Update normal jika tidak ada masalah subtask
     await updateTaskStatusAndOrder(activeId, targetStatus as string);
   };
 
+  // Update Status Task di Firestore
   const updateTaskStatusAndOrder = async (taskId: string, status: string) => {
-    // Optimistic Update sudah terjadi di handleDragOver, 
-    // kita hanya perlu memastikan DB sinkron untuk status final.
-    await supabase.from('tasks').update({ status }).eq('id', taskId);
-    // Fetch ulang untuk memastikan data konsisten
-    fetchTasks();
+    try {
+      const taskRef = doc(db, 'tasks', taskId);
+      await updateDoc(taskRef, { status });
+      fetchTasks();
+    } catch (error) {
+      console.error("Error updating status in Firestore:", error);
+    }
   }
 
-  // Fungsi khusus: Pindah ke Done + Centang semua Subtask
+  // Force Complete (Ubah ke Done + Selesaikan semua subtask)
   const forceCompleteTask = async (taskId: string) => {
-    // 1. Update Subtasks -> is_completed: true
-    await supabase.from('subtasks').update({ is_completed: true }).eq('task_id', taskId);
+    try {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return;
 
-    // 2. Update Task -> status: 'done'
-    await supabase.from('tasks').update({ status: 'done' }).eq('id', taskId);
+      const updatedSubtasks = task.subtasks.map(s => ({ ...s, is_completed: true }));
+      const taskRef = doc(db, 'tasks', taskId);
 
-    // 3. Refresh Data
-    fetchTasks();
+      await updateDoc(taskRef, {
+        status: 'done',
+        subtasks: updatedSubtasks
+      });
+
+      fetchTasks();
+    } catch (error) {
+      console.error("Error force completing task in Firestore:", error);
+    }
   }
 
   return (

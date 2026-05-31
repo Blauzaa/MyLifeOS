@@ -1,7 +1,9 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '../../utils/supabase/client'
+import { collection, query, where, getDocs, addDoc, deleteDoc, doc } from 'firebase/firestore'
+import { db, auth } from '../../utils/firebase/client'
+import { onAuthStateChanged, User } from 'firebase/auth'
 import {
   ChevronLeft, ChevronRight, X, Trash2,
   Calendar as CalIcon, Plus, Clock, Loader2, MapPin
@@ -9,7 +11,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion'
 import { useModal } from '../../context/ModalContext'
 
-const supabase = createClient()
+// Supabase client removed.
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -46,14 +48,29 @@ export default function CalendarPage() {
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate()
   const getFirstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay()
 
-  const fetchEvents = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    const { data } = await supabase.from('events').select('*').eq('user_id', user.id)
-    if (data) setEvents(data as CalendarEvent[])
+  const fetchEvents = useCallback(async (userArg?: User) => {
+    try {
+      const user = userArg || auth.currentUser
+      if (!user) return
+      const q = query(collection(db, 'events'), where('user_id', '==', user.uid));
+      const querySnapshot = await getDocs(q);
+      const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setEvents(data as CalendarEvent[])
+    } catch (error) {
+      console.error("Error fetching events:", error)
+    }
   }, [])
 
-  useEffect(() => { fetchEvents() }, [fetchEvents])
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        fetchEvents(user)
+      } else {
+        setEvents([])
+      }
+    })
+    return () => unsubscribe()
+  }, [fetchEvents])
 
   // --- NAVIGATION HANDLERS ---
   const changeMonth = (dir: number) => {
@@ -92,16 +109,21 @@ export default function CalendarPage() {
   const handleSave = async () => {
     if (!formData.title) return
     setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
 
     if (user && selectedDate) {
-      await supabase.from('events').insert({
-        user_id: user.id,
-        event_date: selectedDate,
-        ...formData
-      })
-      await fetchEvents()
-      setShowEventModal(false)
+      try {
+        await addDoc(collection(db, 'events'), {
+          user_id: user.uid,
+          event_date: selectedDate,
+          ...formData,
+          created_at: new Date().toISOString()
+        })
+        await fetchEvents(user)
+        setShowEventModal(false)
+      } catch (error) {
+        console.error("Error saving event:", error)
+      }
     }
     setLoading(false)
   }
@@ -113,9 +135,13 @@ export default function CalendarPage() {
       message: 'Are you sure you want to remove this schedule?',
       type: 'danger',
       onConfirm: async () => {
-        await supabase.from('events').delete().eq('id', id)
-        // Optimistic update agar terasa cepat
-        setEvents(prev => prev.filter(e => e.id !== id))
+        try {
+          await deleteDoc(doc(db, 'events', id))
+          // Optimistic update agar terasa cepat
+          setEvents(prev => prev.filter(e => e.id !== id))
+        } catch (error) {
+          console.error("Error deleting event:", error)
+        }
       }
     })
   }

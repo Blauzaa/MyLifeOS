@@ -1,8 +1,8 @@
 import { groq } from '@ai-sdk/groq';
 import { streamText, tool } from 'ai';
 import { z } from 'zod';
-// Import dari file SERVER (Langkah 1B)
-import { createClient } from '../../../utils/supabase/server';
+import { adminDb, adminAuth } from '../../../utils/firebase/admin';
+import admin from 'firebase-admin';
 
 export const maxDuration = 30;
 
@@ -10,9 +10,20 @@ export async function POST(req: Request) {
   try {
     const { messages } = await req.json();
 
-    // Init Supabase di Server
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    // Decode Firebase ID Token dari Authorization Header
+    const authHeader = req.headers.get('authorization');
+    let userId = 'Guest';
+    let user = null;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      try {
+        const decodedToken = await adminAuth.verifyIdToken(token);
+        userId = decodedToken.uid;
+        user = decodedToken;
+      } catch (error) {
+        console.error('Error verifying Firebase ID token:', error);
+      }
+    }
 
     // Get Current Time for Context
     const now = new Date();
@@ -53,8 +64,19 @@ export async function POST(req: Request) {
           }),
           execute: async ({ title, status, priority }) => {
             if (!user) return 'Error: Login required.';
-            const { error } = await supabase.from('tasks').insert({ title, status, priority, user_id: user.id });
-            return error ? `Error: ${error.message}` : `✅ Task created: "${title}"`;
+            try {
+              await adminDb.collection('tasks').add({
+                title,
+                status,
+                priority,
+                user_id: userId,
+                subtasks: [],
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+              });
+              return `✅ Task created: "${title}"`;
+            } catch (error: any) {
+              return `Error: ${error.message}`;
+            }
           },
         }),
         addFinance: tool({
@@ -66,8 +88,18 @@ export async function POST(req: Request) {
           }),
           execute: async ({ title, amount, type }) => {
             if (!user) return 'Error: Login required.';
-            const { error } = await supabase.from('finances').insert({ title, amount, type, user_id: user.id });
-            return error ? `Error: ${error.message}` : `💰 ${type === 'income' ? 'Income' : 'Expense'} recorded: ${title} (Rp ${amount})`;
+            try {
+              await adminDb.collection('finances').add({
+                title,
+                amount: Number(amount),
+                type,
+                user_id: userId,
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+              });
+              return `💰 ${type === 'income' ? 'Income' : 'Expense'} recorded: ${title} (Rp ${amount})`;
+            } catch (error: any) {
+              return `Error: ${error.message}`;
+            }
           }
         }),
         addNote: tool({
@@ -78,8 +110,17 @@ export async function POST(req: Request) {
           }),
           execute: async ({ title, content }) => {
             if (!user) return 'Error: Login required.';
-            const { error } = await supabase.from('notes').insert({ title, content, user_id: user.id });
-            return error ? `Error: ${error.message}` : `📝 Note saved: "${title}"`;
+            try {
+              await adminDb.collection('notes').add({
+                title,
+                content,
+                user_id: userId,
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+              });
+              return `📝 Note saved: "${title}"`;
+            } catch (error: any) {
+              return `Error: ${error.message}`;
+            }
           }
         }),
         addEvent: tool({
@@ -92,8 +133,19 @@ export async function POST(req: Request) {
           }),
           execute: async ({ title, event_date, start_time, end_time }) => {
             if (!user) return 'Error: Login required.';
-            const { error } = await supabase.from('events').insert({ title, event_date, start_time, end_time, user_id: user.id });
-            return error ? `Error: ${error.message}` : `📅 Event scheduled: "${title}" on ${event_date}`;
+            try {
+              await adminDb.collection('events').add({
+                title,
+                event_date,
+                start_time,
+                end_time,
+                user_id: userId,
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+              });
+              return `📅 Event scheduled: "${title}" on ${event_date}`;
+            } catch (error: any) {
+              return `Error: ${error.message}`;
+            }
           }
         }),
         addWatchlist: tool({
@@ -107,10 +159,27 @@ export async function POST(req: Request) {
           }),
           execute: async ({ title, type, status, link, synopsis }) => {
             if (!user) return 'Error: Login required.';
-            const { error } = await supabase.from('watchlist').insert({
-              title, type, status, link, synopsis, user_id: user.id
-            });
-            return error ? `Error: ${error.message}` : `🎬 Added to Watchlist: "${title}"`;
+            try {
+              const querySnapshot = await adminDb.collection('watchlist')
+                .where('user_id', '==', userId)
+                .where('status', '==', status)
+                .get();
+              const newPos = querySnapshot.size;
+
+              await adminDb.collection('watchlist').add({
+                title,
+                type,
+                status,
+                link: link || '',
+                synopsis: synopsis || '',
+                user_id: userId,
+                position: newPos,
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+              });
+              return `🎬 Added to Watchlist: "${title}"`;
+            } catch (error: any) {
+              return `Error: ${error.message}`;
+            }
           }
         }),
         addResource: tool({
@@ -123,20 +192,34 @@ export async function POST(req: Request) {
           }),
           execute: async ({ title, url, code, type }) => {
             if (!user) return 'Error: Login required.';
+            try {
+              if (type === 'link') {
+                if (!url) return 'Error: URL is required for links.';
+                await adminDb.collection('dynamic_items').add({
+                  title,
+                  url,
+                  type: 'link',
+                  user_id: userId,
+                  created_at: admin.firestore.FieldValue.serverTimestamp()
+                });
+                return `🔗 Link Saved: "${title}"`;
+              }
 
-            if (type === 'link') {
-              if (!url) return 'Error: URL is required for links.';
-              const { error } = await supabase.from('dynamic_items').insert({ title, url, type: 'link', user_id: user.id });
-              return error ? `Error: ${error.message}` : `🔗 Link Saved: "${title}"`;
+              if (type === 'snippet') {
+                if (!code) return 'Error: Code content is required for snippets.';
+                await adminDb.collection('snippets').add({
+                  title,
+                  code,
+                  user_id: userId,
+                  created_at: admin.firestore.FieldValue.serverTimestamp()
+                });
+                return `💻 Snippet Saved: "${title}"`;
+              }
+
+              return 'Error: Invalid resource type.';
+            } catch (error: any) {
+              return `Error: ${error.message}`;
             }
-
-            if (type === 'snippet') {
-              if (!code) return 'Error: Code content is required for snippets.';
-              const { error } = await supabase.from('snippets').insert({ title, code, user_id: user.id });
-              return error ? `Error: ${error.message}` : `💻 Snippet Saved: "${title}"`;
-            }
-
-            return 'Error: Invalid resource type.';
           }
         }),
         triggerAction: tool({

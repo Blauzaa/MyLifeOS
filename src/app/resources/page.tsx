@@ -2,7 +2,9 @@
 /* eslint-disable @next/next/no-img-element */
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { createClient } from '../../utils/supabase/client'
+import { collection, query, where, orderBy, getDocs, addDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore'
+import { db, auth } from '../../utils/firebase/client'
+import { onAuthStateChanged, User } from 'firebase/auth'
 import {
     Plus, Trash2, Copy, Link as LinkIcon, Code,
     ExternalLink, Loader2, Globe, Check, Save
@@ -10,7 +12,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion'
 import { useModal } from '../../context/ModalContext'
 
-const supabase = createClient()
+// Supabase client removed.
 
 // --- TYPES ---
 interface LinkItem {
@@ -47,19 +49,62 @@ export default function ResourcesPage() {
     const { showModal } = useModal()
 
     // --- FETCH DATA ---
-    const fetchData = useCallback(async () => {
-        // setLoading(true) // Optional: Jangan set loading full screen kalau cuma refresh data
-        const [l, s] = await Promise.all([
-            supabase.from('dynamic_items').select('*').order('created_at', { ascending: false }),
-            supabase.from('snippets').select('*').order('created_at', { ascending: false })
-        ])
-        if (l.data) setLinks(l.data as LinkItem[])
-        if (s.data) setSnippets(s.data as SnippetItem[])
-        setLoading(false)
+    const fetchData = useCallback(async (userArg?: User) => {
+        try {
+            const user = userArg || auth.currentUser;
+            if (!user) {
+                setLoading(false)
+                return
+            }
+
+            const linksQuery = query(
+                collection(db, 'dynamic_items'),
+                where('user_id', '==', user.uid),
+                orderBy('created_at', 'desc')
+            );
+            const snippetsQuery = query(
+                collection(db, 'snippets'),
+                where('user_id', '==', user.uid),
+                orderBy('created_at', 'desc')
+            );
+
+            const [linksSnap, snippetsSnap] = await Promise.all([
+                getDocs(linksQuery),
+                getDocs(snippetsQuery)
+            ]);
+
+            const linksList = linksSnap.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                created_at: doc.data().created_at?.toDate ? doc.data().created_at.toDate().toISOString() : new Date().toISOString()
+            })) as LinkItem[];
+
+            const snippetsList = snippetsSnap.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                created_at: doc.data().created_at?.toDate ? doc.data().created_at.toDate().toISOString() : new Date().toISOString()
+            })) as SnippetItem[];
+
+            setLinks(linksList);
+            setSnippets(snippetsList);
+        } catch (error) {
+            console.error("Error fetching resources:", error);
+        } finally {
+            setLoading(false);
+        }
     }, [])
 
     useEffect(() => {
-        fetchData()
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            if (user) {
+                fetchData(user)
+            } else {
+                setLinks([])
+                setSnippets([])
+                setLoading(false)
+            }
+        })
+        return () => unsubscribe()
     }, [fetchData])
 
     // --- ACTIONS: LINKS ---
@@ -67,22 +112,28 @@ export default function ResourcesPage() {
         if (!newLink.title || !newLink.url) return
         setSubmittingLink(true)
 
-        const { data: { user } } = await supabase.auth.getUser()
+        const user = auth.currentUser
         if (!user) return
 
         let finalUrl = newLink.url
         if (!finalUrl.startsWith('http')) finalUrl = `https://${finalUrl}`
 
-        await supabase.from('dynamic_items').insert({
-            title: newLink.title,
-            url: finalUrl,
-            type: 'link',
-            user_id: user.id
-        })
+        try {
+            await addDoc(collection(db, 'dynamic_items'), {
+                title: newLink.title,
+                url: finalUrl,
+                type: 'link',
+                user_id: user.uid,
+                created_at: serverTimestamp()
+            })
 
-        setNewLink({ title: '', url: '' })
-        await fetchData()
-        setSubmittingLink(false)
+            setNewLink({ title: '', url: '' })
+            await fetchData(user)
+        } catch (error) {
+            console.error("Error adding link:", error)
+        } finally {
+            setSubmittingLink(false)
+        }
     }
 
     const handleDeleteLink = (id: string) => {
@@ -91,8 +142,12 @@ export default function ResourcesPage() {
             message: 'Are you sure you want to remove this link?',
             type: 'danger',
             onConfirm: async () => {
-                await supabase.from('dynamic_items').delete().eq('id', id)
-                setLinks(prev => prev.filter(item => item.id !== id))
+                try {
+                    await deleteDoc(doc(db, 'dynamic_items', id))
+                    setLinks(prev => prev.filter(item => item.id !== id))
+                } catch (error) {
+                    console.error("Error deleting link:", error)
+                }
             }
         })
     }
@@ -102,13 +157,22 @@ export default function ResourcesPage() {
         if (!newSnippet.title || !newSnippet.code) return
         setSubmittingSnippet(true)
 
-        const { data: { user } } = await supabase.auth.getUser()
+        const user = auth.currentUser
         if (!user) return
 
-        await supabase.from('snippets').insert({ ...newSnippet, user_id: user.id })
-        setNewSnippet({ title: '', code: '' })
-        await fetchData()
-        setSubmittingSnippet(false)
+        try {
+            await addDoc(collection(db, 'snippets'), {
+                ...newSnippet,
+                user_id: user.uid,
+                created_at: serverTimestamp()
+            })
+            setNewSnippet({ title: '', code: '' })
+            await fetchData(user)
+        } catch (error) {
+            console.error("Error adding snippet:", error)
+        } finally {
+            setSubmittingSnippet(false)
+        }
     }
 
     const handleDeleteSnippet = (id: string) => {
@@ -117,8 +181,12 @@ export default function ResourcesPage() {
             message: 'This code snippet will be lost forever.',
             type: 'danger',
             onConfirm: async () => {
-                await supabase.from('snippets').delete().eq('id', id)
-                setSnippets(prev => prev.filter(item => item.id !== id))
+                try {
+                    await deleteDoc(doc(db, 'snippets', id))
+                    setSnippets(prev => prev.filter(item => item.id !== id))
+                } catch (error) {
+                    console.error("Error deleting snippet:", error)
+                }
             }
         })
     }

@@ -7,18 +7,41 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useModal } from '../context/ModalContext';
 import { useFocus } from '../context/FocusContext';
 import { useRouter } from 'next/navigation';
+import { auth } from '../utils/firebase/client';
 
 export default function AIChat() {
   const [isOpen, setIsOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [idToken, setIdToken] = useState<string | null>(null);
 
   const { showModal } = useModal();
   const { setConfig, setTaskName, switchMode, setIsActive } = useFocus();
   const router = useRouter();
 
+  useEffect(() => {
+    const updateToken = async () => {
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        setIdToken(token || null);
+      } catch (err) {
+        console.error("Error getting ID token:", err);
+      }
+    };
+
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        updateToken();
+      } else {
+        setIdToken(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
   const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages } = useChat({
     api: '/api/chat',
     maxSteps: 5,
+    headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
   });
 
   useEffect(() => {

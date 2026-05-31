@@ -1,9 +1,8 @@
 // src/context/FocusContext.tsx
 'use client'
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react'
-import { createClient } from '../utils/supabase/client'
-
-const supabase = createClient()
+import { collection, query, where, orderBy, limit, getDocs, addDoc, serverTimestamp } from 'firebase/firestore'
+import { db, auth } from '../utils/firebase/client'
 
 // --- DATA LAGU & CONFIG ---
 export const MUSIC_TRACKS = [
@@ -120,11 +119,37 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   }
 
   const fetchSessions = useCallback(async () => {
-    const { data } = await supabase.from('focus_sessions').select('*').order('completed_at', { ascending: false }).limit(5)
-    if (data) setSessions(data)
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+      const q = query(
+        collection(db, 'focus_sessions'),
+        where('user_id', '==', user.uid),
+        orderBy('completed_at', 'desc'),
+        limit(5)
+      );
+      const querySnapshot = await getDocs(q);
+      const data = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        completed_at: doc.data().completed_at?.toDate ? doc.data().completed_at.toDate().toISOString() : new Date().toISOString()
+      }));
+      setSessions(data);
+    } catch (error) {
+      console.error("Error fetching focus sessions from Firestore:", error);
+    }
   }, [])
 
-  useEffect(() => { fetchSessions() }, [fetchSessions])
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        fetchSessions();
+      } else {
+        setSessions([]);
+      }
+    });
+    return () => unsubscribe();
+  }, [fetchSessions]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null
@@ -146,12 +171,19 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     alarm.play().catch(e => console.log(e))
 
     if (mode === 'focus') {
-      const { data: { user } } = await supabase.auth.getUser()
+      const user = auth.currentUser;
       if (user) {
-        await supabase.from('focus_sessions').insert({
-          user_id: user.id, duration_minutes: config.focusDuration, task_name: taskName || 'Deep Work'
-        })
-        fetchSessions()
+        try {
+          await addDoc(collection(db, 'focus_sessions'), {
+            user_id: user.uid,
+            duration_minutes: config.focusDuration,
+            task_name: taskName || 'Deep Work',
+            completed_at: serverTimestamp()
+          });
+          fetchSessions()
+        } catch (error) {
+          console.error("Error adding focus session to Firestore:", error);
+        }
       }
       const nextCycles = cycles + 1
       setCycles(nextCycles)

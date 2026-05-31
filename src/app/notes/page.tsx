@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { createClient } from '../../utils/supabase/client'
+import { collection, query, where, orderBy, getDocs, addDoc, doc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
+import { db, auth } from '../../utils/firebase/client'
+import { onAuthStateChanged, User } from 'firebase/auth'
 import {
   Plus, Trash2, Image as ImageIcon, Loader2, Cloud,
   Search, FileText, MoreVertical, Layout, X
@@ -15,7 +17,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import ImageExtension from '@tiptap/extension-image'
 
-const supabase = createClient()
+// Supabase client removed.
 
 interface Note {
   id: string
@@ -63,16 +65,47 @@ export default function NotesPage() {
       setSaveStatus('unsaved')
       setLastChange(Date.now())
     },
+    immediatelyRender: false, // <-- Add this to prevent SSR/hydration mismatch errors
   })
 
   // 1. FETCH DATA
-  const fetchNotes = useCallback(async () => {
-    const { data } = await supabase.from('notes').select('*').order('created_at', { ascending: false })
-    if (data) setNotes(data as Note[])
-    setLoading(false)
+  const fetchNotes = useCallback(async (userArg?: User) => {
+    try {
+      const user = userArg || auth.currentUser
+      if (!user) {
+        setLoading(false)
+        return
+      }
+      const q = query(
+        collection(db, 'notes'),
+        where('user_id', '==', user.uid),
+        orderBy('created_at', 'desc')
+      );
+      const querySnapshot = await getDocs(q);
+      const data = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        created_at: doc.data().created_at?.toDate ? doc.data().created_at.toDate().toISOString() : new Date().toISOString()
+      }));
+      setNotes(data as Note[]);
+    } catch (error) {
+      console.error("Error fetching notes from Firestore:", error);
+    } finally {
+      setLoading(false);
+    }
   }, [])
 
-  useEffect(() => { fetchNotes() }, [fetchNotes])
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        fetchNotes(user)
+      } else {
+        setNotes([])
+        setLoading(false)
+      }
+    })
+    return () => unsubscribe()
+  }, [fetchNotes])
 
   // Sync Editor Content
   useEffect(() => {
@@ -153,21 +186,7 @@ export default function NotesPage() {
 
   // 4. CREATE NEW NOTE
   const createNewNote = () => {
-    setSelectedNote(null) // This will trigger the "Select a note or create new one" empty state
-    // But wait, the previous logic was:
-    // setSelectedNote({ id: 'new', title: '', content: '', created_at: new Date().toISOString() }) 
-    // OR immediately insert to DB (as requested previously to fix ID issues).
-    // Let's implement the safe way: Just text editor reset, and saveToDb handles the insert.
-    setEditTitle('')
-    editor?.commands.clearContent()
-    setCoverUrlInput('')
-    setSaveStatus('unsaved') // This puts it in "ready to save" state? No, 'unsaved' implies changes made. 
-    // Actually, simply setting selectedNote(null) clears the view?
-    // Looking at the render:
-    // {!selectedNote && !editTitle && editor?.isEmpty && ( Show Placeholder )}
-    // So if we just clear everything, it shows placeholder.
-    // If we want to *start* a new note, we can just focus the editor/title.
-    // Let's just reset states.
+    setSelectedNote(null) 
     setEditTitle('')
     if (editor) editor.commands.setContent('')
     setCoverUrlInput('')
@@ -178,7 +197,7 @@ export default function NotesPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const saveToDb = useCallback(async () => {
     if (isDeletingRef.current) return // BLOCK SAVE IF DELETING
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
     if (!user) return
 
     setSaveStatus('saving')
@@ -195,22 +214,27 @@ export default function NotesPage() {
     try {
       if (selectedNote) {
         // Update existing
-        const { error } = await supabase.from('notes').update(payload).eq('id', selectedNote.id)
-        if (error) throw error
+        const noteRef = doc(db, 'notes', selectedNote.id);
+        await updateDoc(noteRef, payload);
 
         setNotes(prev => prev.map(n => n.id === selectedNote.id ? { ...n, ...payload, cover_url: payload.cover_url || undefined } : n))
       } else {
         // Create new
-        const { data, error } = await supabase.from('notes').insert({
+        const docRef = await addDoc(collection(db, 'notes'), {
           ...payload,
-          user_id: user.id
-        }).select().single()
+          user_id: user.uid,
+          created_at: serverTimestamp()
+        });
 
-        if (error) throw error
-        if (data) {
-          setSelectedNote(data)
-          setNotes(prev => [data, ...prev])
-        }
+        const newNote = {
+          id: docRef.id,
+          ...payload,
+          cover_url: payload.cover_url || undefined,
+          created_at: new Date().toISOString()
+        };
+
+        setSelectedNote(newNote)
+        setNotes(prev => [newNote, ...prev])
       }
       setSaveStatus('saved')
     } catch (error: any) {
@@ -229,8 +253,6 @@ export default function NotesPage() {
     }
   }, [saveStatus, saveToDb])
 
-  // ...
-
   // REQ #8: CUSTOM MODAL DELETE
   const handleDelete = (id: string) => {
     showModal({
@@ -244,10 +266,13 @@ export default function NotesPage() {
         if (noteToDelete?.content) {
           await deleteImagesFromCloudinary(noteToDelete.content)
         }
-        await supabase.from('notes').delete().eq('id', id)
-
-        if (selectedNote?.id === id) setSelectedNote(null)
-        setNotes(prev => prev.filter(n => n.id !== id))
+        try {
+          await deleteDoc(doc(db, 'notes', id));
+          if (selectedNote?.id === id) setSelectedNote(null)
+          setNotes(prev => prev.filter(n => n.id !== id))
+        } catch (error) {
+          console.error("Error deleting note from Firestore:", error);
+        }
 
         // Reset flag after small delay to ensure any pending auto-saves behave
         setTimeout(() => { isDeletingRef.current = false }, 1000)
@@ -335,7 +360,6 @@ export default function NotesPage() {
         <div className="px-6 py-4 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
           <div className="flex gap-3 items-center">
 
-            {/* Status Indicator */}
             {/* Status Indicator */}
             <button
               onClick={() => saveStatus === 'unsaved' && saveToDb()}

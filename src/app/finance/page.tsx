@@ -1,53 +1,74 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { createClient } from '../../utils/supabase/client'
+import { collection, query, where, orderBy, getDocs, addDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore'
+import { db, auth } from '../../utils/firebase/client'
+import { onAuthStateChanged, User } from 'firebase/auth'
 import FinanceWidget from '../../components/FinanceWidget'
 import { TransactionItem } from '../../types'
 import { RefreshCw } from 'lucide-react'
 
 export default function FinancePage() {
-  const supabase = createClient()
   const [transactions, setTransactions] = useState<TransactionItem[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
-  const fetchTransactions = useCallback(async () => {
+  const fetchTransactions = useCallback(async (userArg?: User) => {
     try {
-      const { data, error } = await supabase
-        .from('finances')
-        .select('*')
-        .order('created_at', { ascending: false })
+      const user = userArg || auth.currentUser;
+      if (!user) {
+        setLoading(false)
+        setRefreshing(false)
+        return
+      }
 
-      if (error) throw error
-      if (data) setTransactions(data as TransactionItem[])
+      const q = query(
+        collection(db, 'finances'),
+        where('user_id', '==', user.uid),
+        orderBy('created_at', 'desc')
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const data = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        created_at: doc.data().created_at?.toDate ? doc.data().created_at.toDate().toISOString() : new Date().toISOString()
+      }));
+
+      setTransactions(data as TransactionItem[])
     } catch (error) {
       console.error('Error fetching finance:', error)
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [supabase])
+  }, [])
 
   useEffect(() => {
-    fetchTransactions()
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        fetchTransactions(user)
+      } else {
+        setTransactions([])
+        setLoading(false)
+      }
+    })
+    return () => unsubscribe()
   }, [fetchTransactions])
 
   const handleAdd = async (newItem: { title: string; amount: number; type: 'income' | 'expense' }) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
+      const user = auth.currentUser
       if (!user) return
 
-      const { error } = await supabase
-        .from('finances')
-        .insert([{
-          title: newItem.title,
-          amount: newItem.amount,
-          type: newItem.type,
-          user_id: user.id
-        }])
+      await addDoc(collection(db, 'finances'), {
+        title: newItem.title,
+        amount: Number(newItem.amount),
+        type: newItem.type,
+        user_id: user.uid,
+        created_at: serverTimestamp()
+      })
 
-      if (error) throw error
-      fetchTransactions()
+      fetchTransactions(user)
     } catch (error) {
       alert('Gagal menyimpan.')
     }
@@ -55,8 +76,7 @@ export default function FinancePage() {
 
   const handleDelete = async (id: string) => {
     try {
-      const { error } = await supabase.from('finances').delete().eq('id', id)
-      if (error) throw error
+      await deleteDoc(doc(db, 'finances', id))
       fetchTransactions()
     } catch (error) {
       alert('Gagal menghapus.')

@@ -1,7 +1,9 @@
 /* eslint-disable @next/next/no-img-element */
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '../../utils/supabase/client'
+import { collection, query, where, orderBy, getDocs, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore'
+import { db, auth } from '../../utils/firebase/client'
+import { onAuthStateChanged, User } from 'firebase/auth'
 import {
   Plus, Search, Trash2, Film, Tv, Ghost, Loader2,
   Link as LinkIcon, GripVertical, ImagePlus, X, Save
@@ -33,7 +35,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
-const supabase = createClient()
+// Supabase client removed.
 
 // --- TYPES ---
 type StatusType = 'plan' | 'watching' | 'finished'
@@ -203,13 +205,39 @@ export default function WatchlistPage() {
   );
 
   // 1. FETCH DATA
-  const fetchWatchlist = useCallback(async () => {
-    const { data } = await supabase.from('watchlist').select('*').order('position', { ascending: true })
-    if (data) setItems(data as WatchlistItem[])
-    setLoading(false)
+  const fetchWatchlist = useCallback(async (userArg?: User) => {
+    try {
+      const user = userArg || auth.currentUser;
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      const q = query(
+        collection(db, 'watchlist'),
+        where('user_id', '==', user.uid),
+        orderBy('position', 'asc')
+      );
+      const querySnapshot = await getDocs(q);
+      const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setItems(data as WatchlistItem[]);
+    } catch (error) {
+      console.error("Error fetching watchlist from Firestore:", error);
+    } finally {
+      setLoading(false);
+    }
   }, [])
 
-  useEffect(() => { fetchWatchlist() }, [fetchWatchlist])
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        fetchWatchlist(user);
+      } else {
+        setItems([]);
+        setLoading(false);
+      }
+    });
+    return () => unsubscribe();
+  }, [fetchWatchlist]);
 
   // 2. IMAGE UPLOAD LOGIC (Paste & File Select)
   const handlePaste = async (e: ClipboardEvent) => {
@@ -256,57 +284,51 @@ export default function WatchlistPage() {
   // 3. CRUD OPERATIONS
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault()
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = auth.currentUser
     if (!user) {
       showModal({
         title: 'Error', message: 'You must be logged in.', type: 'danger',
-        onConfirm: function (): Promise<void> | void {
-          throw new Error('Function not implemented.')
-        }
+        onConfirm: () => {}
       })
       return
     }
 
-    // Check if Edit Mode (activeId is used temporarily to store ID being edited when modal is open, 
-    // BUT activeId is also used for DnD. We should use a separate state or just reuse activeId if DnD is not active.
-    // However, logic above sets activeId on click. DnD sets activeId on DragStart. 
-    // They might conflict but likely not at same time. 
-    // BETTER: Use a separate state `editingId`.
-    // But since I used activeId in the previous step, I should use it here or check if items contains it.
-    // Wait, activeId is string | null.
-
     // UPDATE
     if (activeId && items.find(i => i.id === activeId)) {
-      const { error } = await supabase.from('watchlist').update({
-        ...formData, updated_at: new Date()
-      }).eq('id', activeId)
-
-      if (!error) {
+      try {
+        const itemRef = doc(db, 'watchlist', activeId);
+        await updateDoc(itemRef, {
+          ...formData, updated_at: new Date().toISOString()
+        });
         setIsModalOpen(false)
         setActiveId(null)
         setFormData({ title: '', type: 'movie', status: 'plan', link: '', synopsis: '', image_url: '' })
-        fetchWatchlist()
+        fetchWatchlist(user)
+      } catch (error: any) {
+        showModal({
+          title: 'Error', message: error.message, type: 'danger',
+          onConfirm: () => {}
+        });
       }
     } else {
       // CREATE
-      // Auto position at bottom
-      const statusItems = items.filter(i => i.status === formData.status);
-      const newPos = statusItems.length > 0 ? Math.max(...statusItems.map(i => i.position)) + 1 : 0;
+      try {
+        const statusItems = items.filter(i => i.status === formData.status);
+        const newPos = statusItems.length > 0 ? Math.max(...statusItems.map(i => i.position)) + 1 : 0;
 
-      const { error } = await supabase.from('watchlist').insert({
-        ...formData, user_id: user.id, position: newPos
-      })
-
-      if (!error) {
+        await addDoc(collection(db, 'watchlist'), {
+          ...formData,
+          user_id: user.uid,
+          position: newPos,
+          created_at: new Date().toISOString()
+        });
         setIsModalOpen(false)
         setFormData({ title: '', type: 'movie', status: 'plan', link: '', synopsis: '', image_url: '' })
-        fetchWatchlist()
-      } else {
+        fetchWatchlist(user)
+      } catch (error: any) {
         showModal({
           title: 'Error', message: error.message, type: 'danger',
-          onConfirm: function (): Promise<void> | void {
-            throw new Error('Function not implemented.')
-          }
+          onConfirm: () => {}
         })
       }
     }
@@ -319,9 +341,11 @@ export default function WatchlistPage() {
       type: 'danger',
       confirmText: 'Yes, Delete',
       onConfirm: async () => {
-        const { error } = await supabase.from('watchlist').delete().eq('id', id)
-        if (!error) {
+        try {
+          await deleteDoc(doc(db, 'watchlist', id));
           setItems(prev => prev.filter(i => i.id !== id))
+        } catch (error: any) {
+          console.error("Error deleting watchlist item:", error)
         }
       }
     })
@@ -378,11 +402,15 @@ export default function WatchlistPage() {
     // Update DB
     const droppedItem = newItems.find(i => i.id === activeId);
     if (droppedItem) {
-      await supabase.from('watchlist').update({ status: droppedItem.status }).eq('id', droppedItem.id);
-      const containerItems = newItems.filter(i => i.status === droppedItem.status);
-      await Promise.all(
-        containerItems.map((item, idx) => supabase.from('watchlist').update({ position: idx }).eq('id', item.id))
-      );
+      try {
+        await updateDoc(doc(db, 'watchlist', droppedItem.id), { status: droppedItem.status });
+        const containerItems = newItems.filter(i => i.status === droppedItem.status);
+        await Promise.all(
+          containerItems.map((item, idx) => updateDoc(doc(db, 'watchlist', item.id), { position: idx }))
+        );
+      } catch (error) {
+        console.error("Error updating drag-and-drop in Firestore:", error);
+      }
     }
   };
 
