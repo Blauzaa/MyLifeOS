@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getAdminDb } from '../../../utils/firebase/admin';
 import admin from 'firebase-admin';
 
+export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     // 1. Ambil seluruh data proyek tanpa memicu error indeks Firestore
