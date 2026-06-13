@@ -16,7 +16,8 @@ import {
   Calendar,
   Settings,
   User as UserIcon,
-  MoreHorizontal
+  MoreHorizontal,
+  FolderGit
 } from 'lucide-react'
 import { User, onAuthStateChanged, signOut } from 'firebase/auth'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -31,6 +32,7 @@ const menus = [
   { name: 'Watch List', href: '/watchlist', icon: Tv },
   { name: 'Resources', href: '/resources', icon: Layers },
   { name: 'Calendar', href: '/calendar', icon: Calendar },
+  { name: 'Porto Manager', href: '/projects', icon: FolderGit },
 ]
 
 export default function Sidebar() {

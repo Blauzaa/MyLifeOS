@@ -223,6 +223,35 @@ export async function POST(req: Request) {
             }
           }
         }),
+        addProject: tool({
+          description: 'Add a draft of a coding project to showcase on the portfolio website',
+          parameters: z.object({
+            title: z.string().describe('Title of the project'),
+            description: z.string().describe('Short summary of what the project does'),
+            github_url: z.string().optional().describe('GitHub repository URL'),
+            tech_stack: z.array(z.string()).describe('List of technologies used, e.g. ["React", "Node.js"]')
+          }),
+          execute: async ({ title, description, github_url, tech_stack }) => {
+            if (!user) return 'Error: Login required.';
+            try {
+              // ✅ DIUBAH: Menggunakan getAdminDb() alih-alaih adminDb yang tidak didefinisikan
+              await getAdminDb().collection('projects').add({
+                title,
+                description,
+                tech_stack,
+                github_url: github_url || '',
+                demo_url: '',
+                cover_url: '',
+                is_published: false, // Default sebagai draft terlebih dahulu demi kurasi manual
+                user_id: userId,
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+              });
+              return `📁 Project draft created: "${title}". You can curate it further on the Porto Manager page.`;
+            } catch (error: any) {
+              return `Error: ${error.message}`;
+            }
+          }
+        }),
         triggerAction: tool({
           description: 'Trigger client-side navigation or special mode',
           parameters: z.object({
@@ -244,3 +273,5 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 });
   }
 }
+
+
