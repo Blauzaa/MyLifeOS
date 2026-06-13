@@ -1,31 +1,33 @@
 import { NextResponse } from 'next/server';
-import { getAdminDb } from '../../../utils/firebase/admin'; // ✅ Menggunakan getAdminDb
+import { getAdminDb } from '../../../utils/firebase/admin';
 import admin from 'firebase-admin';
 
 export async function GET(request: Request) {
   try {
-    // Ambil data proyek dari Firestore yang berstatus dipublikasikan (is_published)
-    const snapshot = await getAdminDb().collection('projects') // ✅ Memanggil fungsi getAdminDb()
-      .where('is_published', '==', true)
-      .orderBy('created_at', 'desc')
-      .get();
+    // 1. Ambil seluruh data proyek tanpa memicu error indeks Firestore
+    const snapshot = await getAdminDb().collection('projects').get();
 
-    // ✅ Menambahkan tipe data eksplisit (doc: admin.firestore.QueryDocumentSnapshot) untuk menghindari error ts(7006)
-    const projects = snapshot.docs.map((doc: admin.firestore.QueryDocumentSnapshot) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        title: data.title,
-        description: data.description,
-        tech_stack: data.tech_stack || [],
-        github_url: data.github_url || '',
-        demo_url: data.demo_url || '',
-        cover_url: data.cover_url || '',
-        created_at: data.created_at?.toDate ? data.created_at.toDate().toISOString() : new Date().toISOString()
-      };
-    });
+    // 2. Lakukan filter 'is_published' dan sort 'created_at' langsung di memori server
+    const projects = snapshot.docs
+      .map((doc: admin.firestore.QueryDocumentSnapshot) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          title: data.title,
+          description: data.description,
+          tech_stack: data.tech_stack || [],
+          github_url: data.github_url || '',
+          demo_url: data.demo_url || '',
+          cover_url: data.cover_url || '',
+          is_published: data.is_published ?? false,
+          created_at: data.created_at?.toDate ? data.created_at.toDate().toISOString() : new Date().toISOString()
+        };
+      })
+      // Saring hanya proyek yang di-publish
+      .filter(project => project.is_published === true)
+      // Urutkan berdasarkan tanggal terbaru
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-    // Kembalikan response dengan Header CORS agar bisa di-fetch oleh website MyPorto Anda di Vercel
     return NextResponse.json(projects, {
       status: 200,
       headers: {
@@ -40,7 +42,6 @@ export async function GET(request: Request) {
   }
 }
 
-// Handler untuk metode OPTIONS (Preflight request CORS)
 export async function OPTIONS() {
   return NextResponse.json({}, {
     headers: {
