@@ -315,6 +315,80 @@ export default function ProjectsPage() {
     )
   })
 
+  const publishedProjects = filteredProjects.filter(p => p.is_published)
+  const hiddenProjects = filteredProjects.filter(p => !p.is_published)
+
+  const renderProjectCard = (project: ProjectItem) => (
+    <div key={project.id} className="bg-slate-900/80 backdrop-blur-sm border border-white/5 rounded-3xl overflow-hidden flex flex-col group relative hover:border-blue-500/30 transition-all duration-300">
+      
+      {/* Image Header */}
+      <div className="h-44 bg-slate-950 relative overflow-hidden">
+        {project.cover_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={project.cover_url} alt={project.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center text-slate-700">
+            <Code size={36} />
+            <span className="text-[10px] mt-2 uppercase tracking-wider">No Cover Image</span>
+            <span className="text-[9px] text-slate-600 mt-1">Edit to add screenshot</span>
+          </div>
+        )}
+
+        {/* Badge Publish Status */}
+        <div className={`absolute top-3 left-3 px-3 py-1 rounded-full text-[10px] font-bold flex items-center gap-1.5 backdrop-blur-md border ${
+          project.is_published 
+            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.15)]' 
+            : 'bg-slate-800/80 text-slate-400 border-white/5'
+        }`}>
+          {project.is_published ? <Eye size={12} /> : <EyeOff size={12} />}
+          {project.is_published ? 'Published to MyPorto' : 'Draft (Hidden)'}
+        </div>
+      </div>
+
+      {/* Info & Metadata */}
+      <div className="p-5 flex-1 flex flex-col justify-between">
+        <div>
+          <h3 className="font-bold text-lg text-slate-100 truncate mb-2">{project.title}</h3>
+          <p className="text-xs text-slate-400 line-clamp-3 mb-4 leading-relaxed">{project.description}</p>
+          
+          {/* Tech Stack Tags */}
+          <div className="flex flex-wrap gap-1.5 mb-6">
+            {project.tech_stack.map((tech, i) => (
+              <span key={i} className="text-[10px] font-mono bg-white/5 border border-white/5 text-slate-400 px-2 py-0.5 rounded-md">
+                {tech}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer Action Card */}
+        <div className="flex items-center justify-between border-t border-white/5 pt-4">
+          <div className="flex gap-2">
+            {project.github_url && (
+              <a href={project.github_url} target="_blank" rel="noreferrer" className="p-1.5 text-slate-500 hover:text-white transition" title="GitHub Repo">
+                <LinkIcon size={16} />
+              </a>
+            )}
+            {project.demo_url && (
+              <a href={project.demo_url} target="_blank" rel="noreferrer" className="p-1.5 text-slate-500 hover:text-white transition" title="Live Demo">
+                <ExternalLink size={16} />
+              </a>
+            )}
+          </div>
+          
+          <div className="flex gap-1">
+            <button onClick={() => startEdit(project)} className="p-2 text-slate-500 hover:text-blue-400 transition rounded-lg hover:bg-white/5" title="Edit Detail">
+              <Edit2 size={14} />
+            </button>
+            <button onClick={() => handleDeleteProject(project.id)} className="p-2 text-slate-500 hover:text-red-400 transition rounded-lg hover:bg-white/5" title="Remove">
+              <Trash2 size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-black text-slate-200 pb-40 animate-in fade-in duration-700">
       <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-8">
@@ -384,77 +458,28 @@ export default function ProjectsPage() {
             </span>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredProjects.map((project) => (
-              <div key={project.id} className="bg-slate-900/80 backdrop-blur-sm border border-white/5 rounded-3xl overflow-hidden flex flex-col group relative hover:border-blue-500/30 transition-all duration-300">
-                
-                {/* Image Header */}
-                <div className="h-44 bg-slate-950 relative overflow-hidden">
-                  {project.cover_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={project.cover_url} alt={project.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-slate-700">
-                      <Code size={36} />
-                      <span className="text-[10px] mt-2 uppercase tracking-wider">No Cover Image</span>
-                      <span className="text-[9px] text-slate-600 mt-1">Edit to add screenshot</span>
-                    </div>
-                  )}
-
-                  {/* Badge Publish Status */}
-                  <div className={`absolute top-3 left-3 px-3 py-1 rounded-full text-[10px] font-bold flex items-center gap-1.5 backdrop-blur-md border ${
-                    project.is_published 
-                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.15)]' 
-                      : 'bg-slate-800/80 text-slate-400 border-white/5'
-                  }`}>
-                    {project.is_published ? <Eye size={12} /> : <EyeOff size={12} />}
-                    {project.is_published ? 'Published to MyPorto' : 'Draft (Hidden)'}
-                  </div>
-                </div>
-
-                {/* Info & Metadata */}
-                <div className="p-5 flex-1 flex flex-col justify-between">
-                  <div>
-                    <h3 className="font-bold text-lg text-slate-100 truncate mb-2">{project.title}</h3>
-                    <p className="text-xs text-slate-400 line-clamp-3 mb-4 leading-relaxed">{project.description}</p>
-                    
-                    {/* Tech Stack Tags */}
-                    <div className="flex flex-wrap gap-1.5 mb-6">
-                      {project.tech_stack.map((tech, i) => (
-                        <span key={i} className="text-[10px] font-mono bg-white/5 border border-white/5 text-slate-400 px-2 py-0.5 rounded-md">
-                          {tech}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Footer Action Card */}
-                  <div className="flex items-center justify-between border-t border-white/5 pt-4">
-                    <div className="flex gap-2">
-                      {project.github_url && (
-                        <a href={project.github_url} target="_blank" rel="noreferrer" className="p-1.5 text-slate-500 hover:text-white transition" title="GitHub Repo">
-                          <LinkIcon size={16} />
-                        </a>
-                      )}
-                      {project.demo_url && (
-                        <a href={project.demo_url} target="_blank" rel="noreferrer" className="p-1.5 text-slate-500 hover:text-white transition" title="Live Demo">
-                          <ExternalLink size={16} />
-                        </a>
-                      )}
-                    </div>
-                    
-                    <div className="flex gap-1">
-                      <button onClick={() => startEdit(project)} className="p-2 text-slate-500 hover:text-blue-400 transition rounded-lg hover:bg-white/5" title="Edit Detail">
-                        <Edit2 size={14} />
-                      </button>
-                      <button onClick={() => handleDeleteProject(project.id)} className="p-2 text-slate-500 hover:text-red-400 transition rounded-lg hover:bg-white/5" title="Remove">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
+          <div className="space-y-12">
+            {publishedProjects.length > 0 && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6 text-emerald-400 border-b border-white/5 pb-2 flex items-center gap-2">
+                  <Eye size={24} /> Published to MyPorto
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {publishedProjects.map(renderProjectCard)}
                 </div>
               </div>
-            ))}
+            )}
+            
+            {hiddenProjects.length > 0 && (
+              <div>
+                <h2 className="text-2xl font-bold mb-6 text-slate-400 border-b border-white/5 pb-2 flex items-center gap-2">
+                  <EyeOff size={24} /> Hidden / Drafts
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {hiddenProjects.map(renderProjectCard)}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

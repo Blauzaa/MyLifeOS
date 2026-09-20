@@ -1,12 +1,10 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import AIChat from "../components/AIChat";
 import Sidebar from "../components/Sidebar";
 
 // Import kedua Provider
 import { ModalProvider } from '../context/ModalContext'
-import { FocusProvider } from "../context/FocusContext"
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -26,11 +24,7 @@ export default function RootLayout({
         
         {/* PROVIDER 1: Modal */}
         <ModalProvider>
-          {/* PROVIDER 2: Focus Timer (Bungkus di dalamnya) */}
-          <FocusProvider>
           
-            <AIChat />
-            
             <div className="flex">
               {/* Sidebar */}
               <Sidebar />
@@ -43,7 +37,6 @@ export default function RootLayout({
               </main>
             </div>
 
-          </FocusProvider>
         </ModalProvider>
 
       </body>
